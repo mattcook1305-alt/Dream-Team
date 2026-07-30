@@ -154,6 +154,16 @@ function playerPointsMaps(gwstatsAll) {
   return { totals: totals, last3: last3, gwNums: gwNums };
 }
 
+function dtSaveLogin(teamId) {
+  try { window.localStorage.setItem("dt_team_id", teamId); } catch (e) { }
+}
+function dtLoadLogin() {
+  try { return window.localStorage.getItem("dt_team_id"); } catch (e) { return null; }
+}
+function dtClearLogin() {
+  try { window.localStorage.removeItem("dt_team_id"); } catch (e) { }
+}
+
 function nowMs() { return Date.now(); }
 
 function dateInRange(now, openStr, closeStr) {
@@ -454,6 +464,54 @@ function Logo(props) {
 }
 
 function Home(props) {
+  var loggedIn = !!dtLoadLogin();
+  var mainCards;
+  if (loggedIn) {
+    mainCards = [
+      React.createElement("div", {
+        key: "myteam", onClick: function () { props.onNav("myteam"); },
+        style: { background: "#ffd23f", color: "#12233f", borderRadius: 16, padding: "22px", textAlign: "center", boxShadow: "0 2px 6px rgba(0,0,0,0.3)", marginBottom: 16 }
+      },
+        React.createElement("div", { style: { fontSize: 20, fontWeight: 800, marginBottom: 4 } }, "\ud83d\udcc4 My Team"),
+        React.createElement("div", { style: { fontSize: 12, opacity: 0.8 } }, "View your squad and make transfers")
+      ),
+      React.createElement("div", {
+        key: "rules", onClick: function () { props.onNav("rules"); },
+        style: { background: "#152a4d", borderRadius: 16, padding: "20px", marginBottom: 16, textAlign: "center", boxShadow: "0 2px 6px rgba(0,0,0,0.3)" }
+      },
+        React.createElement("div", { style: { fontSize: 18, fontWeight: 800, marginBottom: 4 } }, "\ud83d\udcd6 Rules"),
+        React.createElement("div", { style: { fontSize: 12, opacity: 0.75 } }, "How the competition and scoring works")
+      ),
+      React.createElement("div", {
+        key: "another", onClick: function () { props.onNav("team"); },
+        style: { textAlign: "center", fontSize: 13, color: "#ffd23f", textDecoration: "underline" }
+      }, "Enter another team")
+    ];
+  } else {
+    mainCards = [
+      React.createElement("div", {
+        key: "rules", onClick: function () { props.onNav("rules"); },
+        style: { background: "#152a4d", borderRadius: 16, padding: "20px", marginBottom: 16, textAlign: "center", boxShadow: "0 2px 6px rgba(0,0,0,0.3)" }
+      },
+        React.createElement("div", { style: { fontSize: 18, fontWeight: 800, marginBottom: 4 } }, "\ud83d\udcd6 Rules"),
+        React.createElement("div", { style: { fontSize: 12, opacity: 0.75 } }, "How the competition and scoring works")
+      ),
+      React.createElement("div", {
+        key: "enter", onClick: function () { props.onNav("team"); },
+        style: { background: "#ffd23f", color: "#12233f", borderRadius: 16, padding: "22px", textAlign: "center", boxShadow: "0 2px 6px rgba(0,0,0,0.3)", marginBottom: 16 }
+      },
+        React.createElement("div", { style: { fontSize: 20, fontWeight: 800, marginBottom: 4 } }, "\u26bd Enter"),
+        React.createElement("div", { style: { fontSize: 12, opacity: 0.8 } }, "Set up your account and pick your 11")
+      ),
+      React.createElement("div", {
+        key: "login", onClick: function () { props.onNav("myteam"); },
+        style: { background: "#1c3253", borderRadius: 16, padding: "18px", textAlign: "center", boxShadow: "0 2px 6px rgba(0,0,0,0.3)" }
+      },
+        React.createElement("div", { style: { fontSize: 16, fontWeight: 800, marginBottom: 4 } }, "\ud83d\udd11 Login"),
+        React.createElement("div", { style: { fontSize: 12, opacity: 0.75 } }, "Already entered? Sign in to manage your team")
+      )
+    ];
+  }
   return React.createElement(React.Fragment, null,
     React.createElement("div", {
       style: { background: "linear-gradient(135deg,#1a2a4a,#274b8c)", padding: "34px 20px 26px", textAlign: "center" }
@@ -463,25 +521,79 @@ function Home(props) {
       React.createElement("div", { style: { fontSize: 16, fontWeight: 700, color: "#ffd23f", marginTop: 2 } }, "DREAM TEAM"),
       React.createElement("div", { style: { fontSize: 12, opacity: 0.8, marginTop: 6 } }, CFG.seasonLabel + " season")
     ),
-    React.createElement("div", { style: { padding: "24px 20px" } },
-      React.createElement("div", {
-        onClick: function () { props.onNav("rules"); },
-        style: { background: "#152a4d", borderRadius: 16, padding: "20px", marginBottom: 16, textAlign: "center", boxShadow: "0 2px 6px rgba(0,0,0,0.3)" }
-      },
-        React.createElement("div", { style: { fontSize: 18, fontWeight: 800, marginBottom: 4 } }, "\ud83d\udcd6 Rules"),
-        React.createElement("div", { style: { fontSize: 12, opacity: 0.75 } }, "How the competition and scoring works")
-      ),
-      React.createElement("div", {
-        onClick: function () { props.onNav("team"); },
-        style: { background: "#ffd23f", color: "#12233f", borderRadius: 16, padding: "22px", textAlign: "center", boxShadow: "0 2px 6px rgba(0,0,0,0.3)" }
-      },
-        React.createElement("div", { style: { fontSize: 20, fontWeight: 800, marginBottom: 4 } }, "\u26bd Enter"),
-        React.createElement("div", { style: { fontSize: 12, opacity: 0.8 } }, "Pick your 11 and submit your team")
-      ),
-      React.createElement("div", {
-        onClick: function () { props.onNav("myteam"); },
-        style: { marginTop: 16, textAlign: "center", fontSize: 13, color: "#ffd23f", textDecoration: "underline" }
-      }, "Already entered? Manage transfers")
+    React.createElement("div", { style: { padding: "24px 20px" } }, mainCards)
+  );
+}
+
+/* ---------------- Account Setup ---------------- */
+
+function findExistingTeamForName(teamsObj, name) {
+  var target = (name || "").trim().toLowerCase();
+  if (!target) return null;
+  var ids = Object.keys(teamsObj || {});
+  for (var i = 0; i < ids.length; i++) {
+    var t = teamsObj[ids[i]];
+    if (t && (t.entrantName || "").trim().toLowerCase() === target) return t;
+  }
+  return null;
+}
+
+function AccountSetup(props) {
+  var formArr = React.useState({ entrantName: "", teamName: "", phone: "", pin: "" });
+  var form = formArr[0];
+  var setForm = formArr[1];
+  var errArr = React.useState("");
+  var err = errArr[0];
+  var setErr = errArr[1];
+
+  var existingMatch = findExistingTeamForName(props.teams, form.entrantName);
+
+  function next() {
+    if (!form.entrantName.trim() || !form.teamName.trim()) { setErr("Enter your name and a team name."); return; }
+    var finalPin;
+    if (existingMatch) {
+      finalPin = existingMatch.pin;
+    } else {
+      if (!form.pin || form.pin.trim().length < 4) { setErr("Choose a PIN of at least 4 digits \u2014 you'll use it to sign in later."); return; }
+      finalPin = form.pin.trim();
+    }
+    setErr("");
+    props.onDone({
+      entrantName: form.entrantName.trim(),
+      teamName: form.teamName.trim(),
+      phone: form.phone.trim(),
+      pin: finalPin
+    });
+  }
+
+  return React.createElement(React.Fragment, null,
+    React.createElement(Header, { sub: "Set up your team" }),
+    React.createElement(Card, null,
+      React.createElement("div", { style: { fontSize: 13, marginBottom: 10 } }, "First, a few details. You'll pick your 11 players next."),
+      React.createElement("input", {
+        placeholder: "Your name", value: form.entrantName,
+        onChange: function (e) { setForm(Object.assign({}, form, { entrantName: e.target.value })); },
+        style: { width: "100%", padding: 10, borderRadius: 8, marginBottom: 8, background: "#1c3253", color: "#fff", border: "none" }
+      }),
+      React.createElement("input", {
+        placeholder: "Team name", value: form.teamName,
+        onChange: function (e) { setForm(Object.assign({}, form, { teamName: e.target.value })); },
+        style: { width: "100%", padding: 10, borderRadius: 8, marginBottom: 8, background: "#1c3253", color: "#fff", border: "none" }
+      }),
+      React.createElement("input", {
+        placeholder: "Phone (optional)", value: form.phone,
+        onChange: function (e) { setForm(Object.assign({}, form, { phone: e.target.value })); },
+        style: { width: "100%", padding: 10, borderRadius: 8, marginBottom: 8, background: "#1c3253", color: "#fff", border: "none" }
+      }),
+      existingMatch
+        ? React.createElement("div", { style: { fontSize: 12, color: "#6fcf6f", marginBottom: 10 } }, "Welcome back \u2014 this team will use the same PIN as your other team(s) under this name, so one sign-in covers all of them.")
+        : React.createElement("input", {
+            placeholder: "Choose a PIN (4+ digits)", value: form.pin, type: "password", inputMode: "numeric",
+            onChange: function (e) { setForm(Object.assign({}, form, { pin: e.target.value })); },
+            style: { width: "100%", padding: 10, borderRadius: 8, marginBottom: 10, background: "#1c3253", color: "#fff", border: "none" }
+          }),
+      err ? React.createElement("div", { style: { fontSize: 12, color: "#ff9a9a", marginBottom: 8 } }, err) : null,
+      React.createElement(Btn, { onClick: next }, "Continue to pick your team")
     )
   );
 }
@@ -531,9 +643,6 @@ function TeamBuilder(props) {
   var showFormPickerArr = React.useState(false);
   var showFormPicker = showFormPickerArr[0];
   var setShowFormPicker = showFormPickerArr[1];
-  var formArr = React.useState({ teamName: "", entrantName: "", phone: "", pin: "" });
-  var form = formArr[0];
-  var setForm = formArr[1];
   var msgArr = React.useState("");
   var msg = msgArr[0];
   var setMsg = msgArr[1];
@@ -589,15 +698,14 @@ function TeamBuilder(props) {
   function submitTeam() {
     if (selected.length !== CFG.squadSize) { setMsg("Fill every position first."); return; }
     var finalFormation = matchesFormation(counts) || displayFormation;
-    if (!form.teamName || !form.entrantName) { setMsg("Enter your name and a team name."); return; }
-    if (!form.pin || form.pin.trim().length < 4) { setMsg("Choose a PIN of at least 4 digits \u2014 you'll use it to sign in later."); return; }
+    var reg = props.regInfo || {};
     var newRef = window.db.ref("teams").push();
     var code = newRef.key.slice(-6).toUpperCase();
     newRef.set({
-      entrantName: form.entrantName,
-      phone: form.phone || "",
-      teamName: form.teamName,
-      pin: form.pin.trim(),
+      entrantName: reg.entrantName || "",
+      phone: reg.phone || "",
+      teamName: reg.teamName || "",
+      pin: reg.pin || "",
       formation: finalFormation,
       playerIds: selected,
       code: code,
@@ -609,10 +717,8 @@ function TeamBuilder(props) {
       cost: cost,
       createdAt: Date.now()
     }).then(function () {
-      setMsg("Team submitted! Sign in any time from My Team with your name (or team name) and PIN to manage transfers.");
-      setSelected([]);
-      setForm({ teamName: "", entrantName: "", phone: "", pin: "" });
-      setPreferred(null);
+      dtSaveLogin(newRef.key);
+      if (props.onSubmitted) props.onSubmitted(newRef.key);
     });
   }
 
@@ -800,26 +906,7 @@ function TeamBuilder(props) {
   var footer = null;
   if (selected.length === CFG.squadSize) {
     footer = React.createElement(Card, null,
-      React.createElement("input", {
-        placeholder: "Your name", value: form.entrantName,
-        onChange: function (e) { setForm(Object.assign({}, form, { entrantName: e.target.value })); },
-        style: { width: "100%", padding: 10, borderRadius: 8, marginBottom: 8, background: "#1c3253", color: "#fff", border: "none" }
-      }),
-      React.createElement("input", {
-        placeholder: "Phone (optional)", value: form.phone,
-        onChange: function (e) { setForm(Object.assign({}, form, { phone: e.target.value })); },
-        style: { width: "100%", padding: 10, borderRadius: 8, marginBottom: 8, background: "#1c3253", color: "#fff", border: "none" }
-      }),
-      React.createElement("input", {
-        placeholder: "Team name", value: form.teamName,
-        onChange: function (e) { setForm(Object.assign({}, form, { teamName: e.target.value })); },
-        style: { width: "100%", padding: 10, borderRadius: 8, marginBottom: 8, background: "#1c3253", color: "#fff", border: "none" }
-      }),
-      React.createElement("input", {
-        placeholder: "Choose a PIN (4+ digits)", value: form.pin, type: "password", inputMode: "numeric",
-        onChange: function (e) { setForm(Object.assign({}, form, { pin: e.target.value })); },
-        style: { width: "100%", padding: 10, borderRadius: 8, marginBottom: 10, background: "#1c3253", color: "#fff", border: "none" }
-      }),
+      React.createElement("div", { style: { fontSize: 13, marginBottom: 10 } }, "Team: " + ((props.regInfo && props.regInfo.teamName) || "") + " \u00b7 Manager: " + ((props.regInfo && props.regInfo.entrantName) || "")),
       msg ? React.createElement("div", { style: { fontSize: 12, color: "#ffd23f", marginBottom: 8 } }, msg) : null,
       React.createElement(Btn, { onClick: submitTeam }, "Submit team (\u00a3" + CFG.entryFee + " entry)")
     );
@@ -1635,17 +1722,34 @@ function MyTeam(props) {
     if (!matches.length) { setErr("No team found with that name and PIN."); return; }
     setErr("");
     if (matches.length === 1) {
+      dtSaveLogin(matches[0]);
       setFoundId(matches[0]);
     } else {
       setMatchIds(matches);
     }
   }
 
+  function signOut() {
+    dtClearLogin();
+    setFoundId(null);
+    setNameInput("");
+    setPinInput("");
+    setMatchIds([]);
+  }
+
+  React.useEffect(function () {
+    if (foundId) return;
+    var savedId = dtLoadLogin();
+    if (savedId && teamsObj[savedId]) {
+      setFoundId(savedId);
+    }
+  }, [teamsObj]);
+
   if (matchIds.length > 0 && !foundId) {
     var pickRows = matchIds.map(function (id) {
       var t = teamsObj[id];
       return React.createElement("div", {
-        key: id, onClick: function (tid) { return function () { setFoundId(tid); setMatchIds([]); }; }(id),
+        key: id, onClick: function (tid) { return function () { dtSaveLogin(tid); setFoundId(tid); setMatchIds([]); }; }(id),
         style: { padding: "10px 12px", borderRadius: 8, marginBottom: 6, background: "#1c3253" }
       },
         React.createElement("div", { style: { fontWeight: 700, fontSize: 14 } }, t.teamName),
@@ -1806,7 +1910,8 @@ function MyTeam(props) {
     React.createElement(Header, { sub: team.teamName }),
     React.createElement(Card, null,
       React.createElement("div", { style: { fontSize: 13, marginBottom: 4 } }, team.entrantName + " \u00b7 " + team.formation + " \u00b7 " + fmtMoney(team.cost || 0)),
-      statusLines
+      statusLines,
+      React.createElement(Btn, { variant: "ghost", onClick: signOut }, "Sign out")
     ),
     React.createElement(Card, null,
       React.createElement("div", { style: { fontSize: 12, opacity: 0.7, marginBottom: 8 } }, outId ? "Tap a replacement type below, or tap another player to change your out choice." : "Tap a player to transfer them out."),
@@ -1934,6 +2039,9 @@ function App() {
   var tabArr = React.useState("home");
   var tab = tabArr[0];
   var setTab = tabArr[1];
+  var regInfoArr = React.useState(null);
+  var regInfo = regInfoArr[0];
+  var setRegInfo = regInfoArr[1];
 
   var teamsArr = useDbValue("teams", {});
   var teams = teamsArr[0];
@@ -1973,7 +2081,11 @@ function App() {
 
   var body = null;
   if (tab === "home") body = React.createElement(Home, { onNav: setTab });
-  else if (tab === "team") body = React.createElement(TeamBuilder, { players: ALL_PLAYERS, gwstats: gwstats });
+  else if (tab === "team" && !regInfo) body = React.createElement(AccountSetup, { onDone: function (info) { setRegInfo(info); }, teams: teams });
+  else if (tab === "team") body = React.createElement(TeamBuilder, {
+    players: ALL_PLAYERS, gwstats: gwstats, regInfo: regInfo,
+    onSubmitted: function () { setRegInfo(null); setTab("myteam"); }
+  });
   else if (tab === "myteam") body = React.createElement(MyTeam, { teams: teams, config: config });
   else if (tab === "table") body = React.createElement(LeagueTable, { teams: teams, results: results, gwstats: gwstats });
   else if (tab === "fixtures") body = React.createElement(Fixtures, { fixtures: fixtures });
