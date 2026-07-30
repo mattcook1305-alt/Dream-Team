@@ -1,0 +1,17 @@
+/index.html
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/app.js
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/players-data.js
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/rules-data.js
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/sw.js
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/manifest.json
+  Cache-Control: no-cache, no-store, must-revalidate
