@@ -1279,8 +1279,7 @@ function AdminGate(props) {
         style: { width: "100%", padding: 10, borderRadius: 8, marginBottom: 10, background: "#1c3253", color: "#fff", border: "none" }
       }),
       err ? React.createElement("div", { style: { fontSize: 12, color: "#ff9a9a", marginBottom: 8 } }, err) : null,
-      React.createElement(Btn, { onClick: tryUnlock }, "Unlock"),
-      React.createElement("div", { style: { fontSize: 11, opacity: 0.6, marginTop: 10 } }, "Default PIN is 0000 until changed in Admin > Settings.")
+      React.createElement(Btn, { onClick: tryUnlock }, "Unlock")
     )
   );
 }
@@ -1932,6 +1931,17 @@ function MyTeam(props) {
         setMode(null);
         setMsg("Transfer complete.");
       });
+    } else if (mode === "unlimited") {
+      var freeEntry = { type: "unlimited", outId: outId, inId: inId, outName: outPl.name, inName: inPl.name, timestamp: now };
+      window.db.ref("teams/" + foundId).update({
+        playerIds: newIds,
+        cost: squadCost(newIds),
+        transferLog: log.concat([freeEntry])
+      }).then(function () {
+        setOutId(null);
+        setMode(null);
+        setMsg("Swap complete \u2014 unlimited changes are still available until midnight 16th August.");
+      });
     } else if (mode === "emergency") {
       var pendingEntry = { outId: outId, inId: inId, outName: outPl.name, inName: inPl.name, effectiveGw: currentGw + 1, requestedAt: now };
       window.db.ref("teams/" + foundId).update({
@@ -2047,9 +2057,10 @@ function MyTeam(props) {
     React.createElement(Card, null,
       React.createElement("div", { style: { fontSize: 12, opacity: 0.7, marginBottom: 8 } }, outId ? "Tap a replacement type below, or tap another player to change your out choice." : "Tap a player to transfer them out."),
       squadView === "list" ? squadRows : squadPitchView,
-      outId ? React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 10 } },
-        windowOpen && windowTransfersLeft > 0 ? React.createElement(Btn, { onClick: function () { startTransfer("window"); } }, "Use window transfer") : null,
-        emergencyAvailable ? React.createElement(Btn, { variant: "danger", onClick: function () { startTransfer("emergency"); } }, "Use emergency transfer") : null
+      outId ? React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" } },
+        preSeasonUnlimited ? React.createElement(Btn, { onClick: function () { startTransfer("unlimited"); } }, "Swap player") : null,
+        !preSeasonUnlimited && windowOpen && windowTransfersLeft > 0 ? React.createElement(Btn, { onClick: function () { startTransfer("window"); } }, "Use window transfer") : null,
+        !preSeasonUnlimited && emergencyAvailable ? React.createElement(Btn, { variant: "danger", onClick: function () { startTransfer("emergency"); } }, "Use emergency transfer") : null
       ) : null,
       msg ? React.createElement("div", { style: { fontSize: 12, color: "#ffd23f", marginTop: 10 } }, msg) : null
     )
