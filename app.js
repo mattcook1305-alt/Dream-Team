@@ -166,6 +166,18 @@ function dtClearLogin() {
   try { window.localStorage.removeItem("dt_team_id"); } catch (e) { }
 }
 
+function effectiveSquad(team, gwNum) {
+  var ids = (team.playerIds || []).slice();
+  var pend = team.pendingEmergency;
+  if (pend && gwNum >= pend.effectiveGw) {
+    var idx = ids.indexOf(pend.outId);
+    if (idx >= 0) {
+      ids = ids.slice(0, idx).concat([pend.inId]).concat(ids.slice(idx + 1));
+    }
+  }
+  return ids;
+}
+
 function nowMs() { return Date.now(); }
 
 function dateInRange(now, openStr, closeStr) {
@@ -437,7 +449,8 @@ function Card(props) {
 
 function Btn(props) {
   var style = {
-    padding: "10px 16px", borderRadius: 10, border: "none", fontWeight: 700,
+    padding: "10px 16px", borderRadius: 10, fontWeight: 700,
+    border: props.variant === "ghost" ? "1px solid #ffd23f" : "none",
     background: props.variant === "ghost" ? "transparent" : (props.variant === "danger" ? "#c0392b" : "#ffd23f"),
     color: props.variant === "ghost" ? "#ffd23f" : (props.variant === "danger" ? "#fff" : "#12233f"),
     opacity: props.disabled ? 0.5 : 1
@@ -832,10 +845,12 @@ function TeamBuilder(props) {
       React.createElement("div", null, React.createElement("b", null, selected.length), " / 11"),
       React.createElement("div", null, "Left ", React.createElement("b", { style: { color: remaining < 0 ? "#e05555" : "#6fcf6f" } }, fmtMoney(remaining)))
     ),
-    React.createElement("div", { style: { display: "flex", gap: 8 } },
+    React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
       React.createElement(Btn, { variant: "ghost", onClick: function () { setShowFormPicker(true); } }, "Change formation"),
-      React.createElement(Btn, { variant: "ghost", onClick: function () { setView(view === "pitch" ? "list" : "pitch"); } }, view === "pitch" ? "List view" : "Pitch view")
-    )
+      React.createElement(Btn, { variant: "ghost", onClick: function () { setView(view === "pitch" ? "list" : "pitch"); } }, view === "pitch" ? "List view" : "Pitch view"),
+      props.mode === "edit" && selected.length === CFG.squadSize ? React.createElement(Btn, { onClick: submitTeam }, "Save team") : null
+    ),
+    msg ? React.createElement("div", { style: { fontSize: 12, color: "#ffd23f", marginTop: 8 } }, msg) : null
   );
 
   var mainContent;
@@ -990,7 +1005,7 @@ function LeagueTable(props) {
       body = histRows.length ? histRows : React.createElement("div", { style: { fontSize: 13, opacity: 0.7 } }, "No gameweeks scored yet.");
     } else {
       var statsForGw = gwstatsObj["gw" + gwSel] || {};
-      var pids = team.playerIds || [];
+      var pids = effectiveSquad(team, gwSel);
       var playerRows = pids.map(function (pid) {
         var pl = PLAYERS_BY_ID[pid];
         if (!pl) return null;
@@ -1083,7 +1098,13 @@ function Fixtures(props) {
   gwNums = gwNums.filter(function (n, i) { return gwNums.indexOf(n) === i; });
   gwNums.sort(function (a, b) { return a - b; });
 
-  var activeGwArr = React.useState(gwNums.length ? gwNums[0] : 1);
+  var defaultGw = gwNums.length ? gwNums[gwNums.length - 1] : 1;
+  for (var dgi = 0; dgi < gwNums.length; dgi++) {
+    var gwCheck = fixturesObj["gw" + gwNums[dgi]];
+    var stillToPlay = (gwCheck && gwCheck.matches || []).some(function (m) { return m.status !== "FINISHED"; });
+    if (stillToPlay) { defaultGw = gwNums[dgi]; break; }
+  }
+  var activeGwArr = React.useState(defaultGw);
   var activeGw = activeGwArr[0];
   var setActiveGw = activeGwArr[1];
   var activeGwId = "gw" + activeGw;
@@ -1154,16 +1175,16 @@ function Fixtures(props) {
       onClick: clickable ? function (gwid, match) { return function () { setSelMatch({ gwId: gwid, match: match }); }; }(activeGwId, m) : undefined,
       style: {
         display: "flex", justifyContent: "space-between", alignItems: "center",
-        padding: "14px 12px", borderRadius: 10, marginBottom: 8,
+        padding: "9px 10px", borderRadius: 8, marginBottom: 5,
         background: i % 2 === 0 ? "#182c50" : "#152a4d",
         border: clickable ? "1px solid #6fcf6f55" : "1px solid transparent"
       }
     },
-      React.createElement("div", { style: { flex: 1, fontSize: 14, fontWeight: 600, textAlign: "right" } }, m.home),
+      React.createElement("div", { style: { flex: 1, fontSize: 13, fontWeight: 600, textAlign: "right" } }, m.home),
       React.createElement("div", { style: { flexShrink: 0, padding: "0 14px", fontSize: 12, fontWeight: 800, color: finished ? "#ffd23f" : "#6b7fa8" } },
         finished ? ((m.homeScore != null ? m.homeScore : "?") + " - " + (m.awayScore != null ? m.awayScore : "?")) : "vs"
       ),
-      React.createElement("div", { style: { flex: 1, fontSize: 14, fontWeight: 600 } }, m.away),
+      React.createElement("div", { style: { flex: 1, fontSize: 13, fontWeight: 600 } }, m.away),
       React.createElement("div", { style: { flexShrink: 0, marginLeft: 10, fontSize: 11, opacity: 0.6, minWidth: 60, textAlign: "right" } }, fmtFixtureDate(m.date).split(" ")[0])
     );
   });
@@ -1506,12 +1527,13 @@ function AdminStats(props) {
   }
 
   function recomputeResultsForGw(gwId, statsForGw) {
+    var gwNum = parseInt(gwId.replace("gw", ""), 10);
     var scores = {};
     for (var i2 = 0; i2 < teamIds.length; i2++) {
       var tid = teamIds[i2];
       var team = teamsObj[tid];
       var total = 0;
-      var pids = team.playerIds || [];
+      var pids = effectiveSquad(team, gwNum);
       for (var k = 0; k < pids.length; k++) {
         var pl = PLAYERS_BY_ID[pids[k]];
         var st = statsForGw ? statsForGw[pids[k]] : null;
@@ -1609,28 +1631,7 @@ function AdminStats(props) {
   }
 
   function computeAndSave() {
-    var scores = {};
-    for (var i2 = 0; i2 < teamIds.length; i2++) {
-      var tid = teamIds[i2];
-      var team = teamsObj[tid];
-      var total = 0;
-      var pids = team.playerIds || [];
-      for (var k = 0; k < pids.length; k++) {
-        var pl = PLAYERS_BY_ID[pids[k]];
-        var st = statsObj ? statsObj[pids[k]] : null;
-        total += computeScore(st, pl ? pl.pos : "MID");
-      }
-      scores[tid] = total;
-    }
-    var best = null;
-    for (var tid2 in scores) {
-      if (best === null || scores[tid2] > scores[best]) best = tid2;
-    }
-    window.db.ref("results/gw" + gw).set({
-      teamScores: scores,
-      winnerTeamId: best,
-      winnerPoints: best !== null ? scores[best] : 0
-    });
+    recomputeResultsForGw("gw" + gw, statsObj);
   }
 
   var rows = relevantIds.map(function (pid) {
@@ -1689,75 +1690,6 @@ function AdminEntrants(props) {
     window.db.ref("teams/" + tid).remove();
   }
 
-  function applyDueEmergencyTransfers() {
-    var writes = [];
-    var applied = 0;
-    for (var i = 0; i < teamIds.length; i++) {
-      var tid = teamIds[i];
-      var t = teamsObj[tid];
-      var pend = t.pendingEmergency;
-      if (pend && pend.effectiveGw <= currentGw) {
-        var ids = t.playerIds || [];
-        var idx = ids.indexOf(pend.outId);
-        if (idx >= 0) {
-          var newIds = ids.slice(0, idx).concat([pend.inId]).concat(ids.slice(idx + 1));
-          var log = t.transferLog || [];
-          var entry = { type: "emergency", outId: pend.outId, inId: pend.inId, outName: pend.outName, inName: pend.inName, timestamp: Date.now() };
-          writes.push(window.db.ref("teams/" + tid).update({
-            playerIds: newIds,
-            cost: squadCost(newIds),
-            pendingEmergency: null,
-            transferLog: log.concat([entry])
-          }));
-          applied++;
-        }
-      }
-    }
-    Promise.all(writes).then(function () {
-      setSyncMsg("Applied " + applied + " due emergency transfer" + (applied === 1 ? "" : "s") + ".");
-    });
-  }
-
-  function syncAll() {
-    setSyncMsg("Syncing...");
-    window.db.ref("gwstats").once("value").then(function (snap) {
-      var all = snap.val() || {};
-      var gwIds = Object.keys(all);
-      var writes = [];
-      for (var g = 0; g < gwIds.length; g++) {
-        var gwId = gwIds[g];
-        var statsForGw = all[gwId];
-        var scores = {};
-        for (var i = 0; i < teamIds.length; i++) {
-          var tid = teamIds[i];
-          var team = teamsObj[tid];
-          var total = 0;
-          var pids = team.playerIds || [];
-          for (var k = 0; k < pids.length; k++) {
-            var pl = PLAYERS_BY_ID[pids[k]];
-            var st = statsForGw ? statsForGw[pids[k]] : null;
-            total += computeScore(st, pl ? pl.pos : "MID");
-          }
-          scores[tid] = total;
-        }
-        var best = null;
-        for (var tid2 in scores) {
-          if (best === null || scores[tid2] > scores[best]) best = tid2;
-        }
-        writes.push(window.db.ref("results/" + gwId).set({
-          teamScores: scores,
-          winnerTeamId: best,
-          winnerPoints: best !== null ? scores[best] : 0
-        }));
-      }
-      Promise.all(writes).then(function () {
-        setSyncMsg("Synced " + gwIds.length + " gameweek" + (gwIds.length === 1 ? "" : "s") + " for all teams.");
-      });
-    }).catch(function (e) {
-      setSyncMsg("Sync failed: " + (e && e.message ? e.message : e));
-    });
-  }
-
   var paidCount = 0;
   for (var pc = 0; pc < teamIds.length; pc++) {
     var pmt = teamIds[pc] && teamsObj[teamIds[pc]].payments;
@@ -1769,8 +1701,13 @@ function AdminEntrants(props) {
     var pmt = t.payments || {};
     var totalPaid = (pmt.a ? 40 : 0) + (pmt.b ? 20 : 0) + (pmt.c ? 20 : 0);
     var emStatus = "not used";
-    if (t.pendingEmergency) emStatus = "pending, effective GW" + t.pendingEmergency.effectiveGw;
-    else if (t.emergencyUsed) emStatus = "used";
+    if (t.pendingEmergency) {
+      emStatus = t.pendingEmergency.effectiveGw <= currentGw
+        ? "applied (from GW" + t.pendingEmergency.effectiveGw + ")"
+        : "pending \u2014 auto-applies from GW" + t.pendingEmergency.effectiveGw;
+    } else if (t.emergencyUsed) {
+      emStatus = "used";
+    }
     var payButtons = [
       { key: "a", label: "\u00a340" },
       { key: "b", label: "\u00a320" },
@@ -1807,12 +1744,9 @@ function AdminEntrants(props) {
 
   return React.createElement(Card, null,
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 6 } },
-      React.createElement("div", { style: { fontWeight: 700 } }, "Entrants (" + teamIds.length + " teams, " + paidCount + " fully paid)"),
-      React.createElement("div", { style: { display: "flex", gap: 6 } },
-        React.createElement(Btn, { variant: "ghost", onClick: applyDueEmergencyTransfers }, "Apply due emergency transfers"),
-        React.createElement(Btn, { variant: "ghost", onClick: syncAll }, "Sync scores")
-      )
+      React.createElement("div", { style: { fontWeight: 700 } }, "Entrants (" + teamIds.length + " teams, " + paidCount + " fully paid)")
     ),
+    React.createElement("div", { style: { fontSize: 11, opacity: 0.7, marginBottom: 8 } }, "Emergency transfers apply automatically once their effective gameweek arrives \u2014 no action needed here. Scores recalculate automatically whenever fixtures/stats are synced from Admin > Stats entry."),
     syncMsg ? React.createElement("div", { style: { fontSize: 11, color: "#ffd23f", marginBottom: 8 } }, syncMsg) : null,
     rows
   );
@@ -1952,6 +1886,21 @@ function MyTeam(props) {
   var windowTransfersLeft = CFG.transfersPerWindow - usedThisWindow;
   var emergencyAvailable = !team.emergencyUsed && !windowOpen && inAnyPeriod(emergencyPeriods, now);
   var pending = team.pendingEmergency || null;
+
+  React.useEffect(function () {
+    if (!pending || pending.effectiveGw > currentGw) return;
+    var ids = team.playerIds || [];
+    var idx = ids.indexOf(pending.outId);
+    if (idx < 0) return;
+    var newIds = ids.slice(0, idx).concat([pending.inId]).concat(ids.slice(idx + 1));
+    var entry = { type: "emergency", outId: pending.outId, inId: pending.inId, outName: pending.outName, inName: pending.inName, timestamp: nowMs() };
+    window.db.ref("teams/" + foundId).update({
+      playerIds: newIds,
+      cost: squadCost(newIds),
+      pendingEmergency: null,
+      transferLog: (team.transferLog || []).concat([entry])
+    });
+  }, [foundId, currentGw, pending && pending.effectiveGw]);
 
   if (editing) {
     return React.createElement(TeamBuilder, {
