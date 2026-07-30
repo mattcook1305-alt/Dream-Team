@@ -479,6 +479,11 @@ function Home(props) {
   var installArr = React.useState(!!window.dtDeferredInstallPrompt);
   var canInstall = installArr[0];
   var setCanInstall = installArr[1];
+  var showAndroidHelpArr = React.useState(false);
+  var showAndroidHelp = showAndroidHelpArr[0];
+  var setShowAndroidHelp = showAndroidHelpArr[1];
+
+  var isAndroid = /android/i.test(navigator.userAgent || "");
 
   React.useEffect(function () {
     function onAvailable() { setCanInstall(true); }
@@ -487,12 +492,15 @@ function Home(props) {
   }, []);
 
   function doInstall() {
-    if (!window.dtDeferredInstallPrompt) return;
-    window.dtDeferredInstallPrompt.prompt();
-    window.dtDeferredInstallPrompt.userChoice.then(function () {
-      window.dtDeferredInstallPrompt = null;
-      setCanInstall(false);
-    });
+    if (window.dtDeferredInstallPrompt) {
+      window.dtDeferredInstallPrompt.prompt();
+      window.dtDeferredInstallPrompt.userChoice.then(function () {
+        window.dtDeferredInstallPrompt = null;
+        setCanInstall(false);
+      });
+    } else {
+      setShowAndroidHelp(true);
+    }
   }
 
   var mainCards;
@@ -551,11 +559,14 @@ function Home(props) {
       React.createElement("div", { style: { fontSize: 16, fontWeight: 700, color: "#ffd23f", marginTop: 2 } }, "DREAM TEAM"),
       React.createElement("div", { style: { fontSize: 12, opacity: 0.8, marginTop: 6 } }, CFG.seasonLabel + " season")
     ),
-    canInstall ? React.createElement("div", { style: { padding: "0 20px" } },
+    isAndroid ? React.createElement("div", { style: { padding: "0 20px 14px" } },
       React.createElement("div", {
         onClick: doInstall,
         style: { background: "#1c3253", border: "1px solid #6fcf6f", borderRadius: 12, padding: "12px", textAlign: "center", fontSize: 13, fontWeight: 700, color: "#6fcf6f" }
-      }, "\u2b07\ufe0f Install app on this device")
+      }, "\u2b07\ufe0f Install app on this device"),
+      showAndroidHelp ? React.createElement("div", { style: { fontSize: 12, opacity: 0.85, marginTop: 8, textAlign: "center" } },
+        "Couldn't install automatically \u2014 open this page in Chrome, then tap the \u22ee menu (top right) and choose \"Add to Home screen\" or \"Install app\"."
+      ) : null
     ) : null,
     React.createElement("div", { style: { padding: "24px 20px" } }, mainCards)
   );
