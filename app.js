@@ -476,6 +476,25 @@ function Logo(props) {
 
 function Home(props) {
   var loggedIn = !!dtLoadLogin();
+  var installArr = React.useState(!!window.dtDeferredInstallPrompt);
+  var canInstall = installArr[0];
+  var setCanInstall = installArr[1];
+
+  React.useEffect(function () {
+    function onAvailable() { setCanInstall(true); }
+    window.addEventListener("dtInstallAvailable", onAvailable);
+    return function () { window.removeEventListener("dtInstallAvailable", onAvailable); };
+  }, []);
+
+  function doInstall() {
+    if (!window.dtDeferredInstallPrompt) return;
+    window.dtDeferredInstallPrompt.prompt();
+    window.dtDeferredInstallPrompt.userChoice.then(function () {
+      window.dtDeferredInstallPrompt = null;
+      setCanInstall(false);
+    });
+  }
+
   var mainCards;
   if (loggedIn) {
     mainCards = [
@@ -532,6 +551,12 @@ function Home(props) {
       React.createElement("div", { style: { fontSize: 16, fontWeight: 700, color: "#ffd23f", marginTop: 2 } }, "DREAM TEAM"),
       React.createElement("div", { style: { fontSize: 12, opacity: 0.8, marginTop: 6 } }, CFG.seasonLabel + " season")
     ),
+    canInstall ? React.createElement("div", { style: { padding: "0 20px" } },
+      React.createElement("div", {
+        onClick: doInstall,
+        style: { background: "#1c3253", border: "1px solid #6fcf6f", borderRadius: 12, padding: "12px", textAlign: "center", fontSize: 13, fontWeight: 700, color: "#6fcf6f" }
+      }, "\u2b07\ufe0f Install app on this device")
+    ) : null,
     React.createElement("div", { style: { padding: "24px 20px" } }, mainCards)
   );
 }
@@ -550,7 +575,7 @@ function findExistingTeamForName(teamsObj, name) {
 }
 
 function AccountSetup(props) {
-  var formArr = React.useState({ entrantName: "", teamName: "", phone: "", pin: "" });
+  var formArr = React.useState({ entrantName: "", teamName: "", phone: "", email: "", pin: "" });
   var form = formArr[0];
   var setForm = formArr[1];
   var errArr = React.useState("");
@@ -561,6 +586,9 @@ function AccountSetup(props) {
 
   function next() {
     if (!form.entrantName.trim() || !form.teamName.trim()) { setErr("Enter your name and a team name."); return; }
+    if (!form.phone.trim()) { setErr("Phone number is required."); return; }
+    var emailTrim = form.email.trim();
+    if (!emailTrim || emailTrim.indexOf("@") < 0 || emailTrim.indexOf(".") < 0) { setErr("Enter a valid email address."); return; }
     var finalPin;
     if (existingMatch) {
       finalPin = existingMatch.pin;
@@ -573,6 +601,7 @@ function AccountSetup(props) {
       entrantName: form.entrantName.trim(),
       teamName: form.teamName.trim(),
       phone: form.phone.trim(),
+      email: emailTrim,
       pin: finalPin
     });
   }
@@ -592,8 +621,13 @@ function AccountSetup(props) {
         style: { width: "100%", padding: 10, borderRadius: 8, marginBottom: 8, background: "#1c3253", color: "#fff", border: "none" }
       }),
       React.createElement("input", {
-        placeholder: "Phone (optional)", value: form.phone,
+        placeholder: "Phone number", value: form.phone, inputMode: "tel",
         onChange: function (e) { setForm(Object.assign({}, form, { phone: e.target.value })); },
+        style: { width: "100%", padding: 10, borderRadius: 8, marginBottom: 8, background: "#1c3253", color: "#fff", border: "none" }
+      }),
+      React.createElement("input", {
+        placeholder: "Email address", value: form.email, inputMode: "email",
+        onChange: function (e) { setForm(Object.assign({}, form, { email: e.target.value })); },
         style: { width: "100%", padding: 10, borderRadius: 8, marginBottom: 8, background: "#1c3253", color: "#fff", border: "none" }
       }),
       existingMatch
@@ -725,6 +759,7 @@ function TeamBuilder(props) {
     newRef.set({
       entrantName: reg.entrantName || "",
       phone: reg.phone || "",
+      email: reg.email || "",
       teamName: reg.teamName || "",
       pin: reg.pin || "",
       formation: finalFormation,
