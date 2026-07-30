@@ -20,24 +20,39 @@ function computeScore(stat, pos) {
   var mins = stat.mins || 0;
   if (mins >= 60) pts += 2;
   else if (mins > 0) pts += 1;
-  pts += (stat.bigChances || 0) * 1;
-  pts += (stat.shotsOnTarget || 0) * 1;
-  pts += (stat.assists || 0) * 2;
-  pts += Math.floor((stat.tackles || 0) / 2) * 1;
-  var goals = stat.goals || 0;
-  pts += goals * 5;
-  if (goals >= 3) pts += 5;
-  pts -= (stat.ownGoals || 0) * 5;
+
+  pts += (stat.assists || 0) * 3;
+  pts -= (stat.ownGoals || 0) * 2;
   pts -= (stat.yellow || 0) * 1;
-  if (stat.red) pts -= 5;
-  if (pos === "MID" && stat.cleanSheet) pts += 2;
-  if (pos === "DEF" || pos === "GK") {
-    if (stat.cleanSheet) pts += 5;
-    var gc = stat.goalsConceded || 0;
-    if (gc >= 2) pts -= (gc - 1);
+  if (stat.red) pts -= 3;
+  pts -= (stat.penMissTaker || 0) * 2;
+
+  var cbit = stat.cbit || 0;
+  if (pos === "GK" || pos === "DEF") {
+    if (cbit >= 10) pts += 2;
+  } else if (pos === "MID" || pos === "FWD") {
+    if (cbit >= 12) pts += 2;
   }
-  pts += (stat.penSaveGK || 0) * 5;
-  pts -= (stat.penMissTaker || 0) * 5;
+
+  var goals = stat.goals || 0;
+  if (pos === "GK") pts += goals * 10;
+  else if (pos === "DEF") pts += goals * 6;
+  else if (pos === "MID") pts += goals * 5;
+  else if (pos === "FWD") pts += goals * 4;
+
+  if (pos === "GK" || pos === "DEF") {
+    if (stat.cleanSheet) pts += 4;
+    var gc = stat.goalsConceded || 0;
+    pts -= Math.max(0, gc - 1);
+  } else if (pos === "MID") {
+    if (stat.cleanSheet) pts += 1;
+  }
+
+  if (pos === "GK") {
+    pts += (stat.penSaveGK || 0) * 5;
+    pts += Math.floor((stat.saves || 0) / 3) * 1;
+  }
+
   pts += (stat.bonus || 0);
   return pts;
 }
@@ -222,17 +237,21 @@ function mapSofaLineupsToUpdates(lineupData, homeConceded, awayConceded, homeTea
       var assists = statNum(stat, ["goalAssist"]);
       var yellow = statNum(stat, ["yellowCard"]);
       var red = !!statNum(stat, ["redCard", "redYellowCard"]);
-      var shotsOnTarget = statNum(stat, ["onTargetScoringAttempt"]);
-      var tackles = statNum(stat, ["totalTackle", "tackle"]);
-      var bigChances = statNum(stat, ["bigChanceCreated"]);
       var ownGoals = statNum(stat, ["ownGoals"]);
       var penSaveGK = statNum(stat, ["penaltySave"]);
       var penMissTaker = statNum(stat, ["penaltyMiss"]);
+      var saves = statNum(stat, ["saves", "totalSaves"]);
+      var clearances = statNum(stat, ["totalClearance", "clearanceOffLine"]);
+      var blocks = statNum(stat, ["blockedScoringAttempt", "outfielderBlock"]);
+      var interceptions = statNum(stat, ["interceptionWon", "totalInterception"]);
+      var tackles = statNum(stat, ["totalTackle", "tackle"]);
+      var recoveries = (localP.pos === "MID" || localP.pos === "FWD") ? statNum(stat, ["ballRecovery", "possessionWonAttThird"]) : 0;
+      var cbit = clearances + blocks + interceptions + tackles + recoveries;
       var goalsConcededVal = (localP.pos === "DEF" || localP.pos === "GK") ? (conceded || 0) : 0;
       var cleanSheet = conceded === 0;
       updates[localP.id] = {
-        mins: mins, goals: goals, assists: assists, yellow: yellow, red: red,
-        shotsOnTarget: shotsOnTarget, tackles: tackles, bigChances: bigChances, ownGoals: ownGoals,
+        mins: mins, goals: goals, assists: assists, yellow: yellow, red: red, ownGoals: ownGoals,
+        cbit: cbit, saves: saves,
         penSaveGK: penSaveGK, penMissTaker: penMissTaker,
         goalsConceded: goalsConcededVal, cleanSheet: cleanSheet
       };
@@ -512,7 +531,7 @@ function TeamBuilder(props) {
   var showFormPickerArr = React.useState(false);
   var showFormPicker = showFormPickerArr[0];
   var setShowFormPicker = showFormPickerArr[1];
-  var formArr = React.useState({ teamName: "", entrantName: "", phone: "" });
+  var formArr = React.useState({ teamName: "", entrantName: "", phone: "", pin: "" });
   var form = formArr[0];
   var setForm = formArr[1];
   var msgArr = React.useState("");
@@ -571,12 +590,14 @@ function TeamBuilder(props) {
     if (selected.length !== CFG.squadSize) { setMsg("Fill every position first."); return; }
     var finalFormation = matchesFormation(counts) || displayFormation;
     if (!form.teamName || !form.entrantName) { setMsg("Enter your name and a team name."); return; }
+    if (!form.pin || form.pin.trim().length < 4) { setMsg("Choose a PIN of at least 4 digits \u2014 you'll use it to sign in later."); return; }
     var newRef = window.db.ref("teams").push();
     var code = newRef.key.slice(-6).toUpperCase();
     newRef.set({
       entrantName: form.entrantName,
       phone: form.phone || "",
       teamName: form.teamName,
+      pin: form.pin.trim(),
       formation: finalFormation,
       playerIds: selected,
       code: code,
@@ -588,9 +609,9 @@ function TeamBuilder(props) {
       cost: cost,
       createdAt: Date.now()
     }).then(function () {
-      setMsg("Team submitted! Your team code is " + code + " \u2014 save this, you'll need it to make transfers later.");
+      setMsg("Team submitted! Sign in any time from My Team with your name (or team name) and PIN to manage transfers.");
       setSelected([]);
-      setForm({ teamName: "", entrantName: "", phone: "" });
+      setForm({ teamName: "", entrantName: "", phone: "", pin: "" });
       setPreferred(null);
     });
   }
@@ -792,6 +813,11 @@ function TeamBuilder(props) {
       React.createElement("input", {
         placeholder: "Team name", value: form.teamName,
         onChange: function (e) { setForm(Object.assign({}, form, { teamName: e.target.value })); },
+        style: { width: "100%", padding: 10, borderRadius: 8, marginBottom: 8, background: "#1c3253", color: "#fff", border: "none" }
+      }),
+      React.createElement("input", {
+        placeholder: "Choose a PIN (4+ digits)", value: form.pin, type: "password", inputMode: "numeric",
+        onChange: function (e) { setForm(Object.assign({}, form, { pin: e.target.value })); },
         style: { width: "100%", padding: 10, borderRadius: 8, marginBottom: 10, background: "#1c3253", color: "#fff", border: "none" }
       }),
       msg ? React.createElement("div", { style: { fontSize: 12, color: "#ffd23f", marginBottom: 8 } }, msg) : null,
@@ -922,6 +948,16 @@ function LeagueTable(props) {
 
 /* ---------------- Fixtures ---------------- */
 
+function fmtFixtureDate(d) {
+  if (!d) return "";
+  var parts = d.split(" ");
+  var datePart = parts[0];
+  var timePart = parts[1] || "";
+  var ymd = datePart.split("-");
+  if (ymd.length !== 3) return d;
+  return ymd[2] + "/" + ymd[1] + "/" + ymd[0] + (timePart ? " " + timePart : "");
+}
+
 function Fixtures(props) {
   var fixturesObj = props.fixtures;
   var gwKeys = Object.keys(fixturesObj || {}).sort(function (a, b) {
@@ -934,7 +970,7 @@ function Fixtures(props) {
     var matches = (gw.matches || []).map(function (m, i) {
       return React.createElement("div", { key: i, style: { display: "flex", justifyContent: "space-between", fontSize: 13, padding: "4px 0" } },
         React.createElement("span", null, m.home + " v " + m.away),
-        React.createElement("span", { style: { opacity: 0.7 } }, m.date || "")
+        React.createElement("span", { style: { opacity: 0.7 } }, fmtFixtureDate(m.date))
       );
     });
     return React.createElement(Card, { key: gwId },
@@ -1398,7 +1434,7 @@ function AdminStats(props) {
     return React.createElement("div", { key: pid, style: { borderBottom: "1px solid #1c3253", padding: "8px 4px" } },
       React.createElement("div", { style: { fontWeight: 700, fontSize: 13, marginBottom: 4 } }, pl.name + " (" + pl.pos + ", " + pl.club + ")"),
       React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 6 } },
-        ["mins", "goals", "assists", "bigChances", "shotsOnTarget", "tackles", "ownGoals", "yellow", "goalsConceded", "penSaveGK", "penMissTaker", "bonus"].map(function (field) {
+        ["mins", "goals", "assists", "cbit", "saves", "ownGoals", "yellow", "goalsConceded", "penSaveGK", "penMissTaker", "bonus"].map(function (field) {
           return React.createElement("input", {
             key: field, placeholder: field, defaultValue: st[field] || "",
             onBlur: function (e) { updateStat(pid, field, e.target.value); },
@@ -1427,7 +1463,7 @@ function AdminStats(props) {
       React.createElement(Btn, { variant: "ghost", onClick: computeAndSave }, "Recompute this GW only")
     ),
     syncMsg ? React.createElement("div", { style: { fontSize: 11, color: "#ffd23f", marginBottom: 8 } }, syncMsg) : null,
-    React.createElement("div", { style: { fontSize: 11, opacity: 0.7, marginBottom: 8 } }, "Only players who appear in at least one submitted squad are listed. Fields blur-save individually."),
+    React.createElement("div", { style: { fontSize: 11, opacity: 0.7, marginBottom: 8 } }, "Only players who appear in at least one submitted squad are listed. Fields blur-save individually. \"cbit\" = combined clearances + blocks + interceptions + tackles (+ recoveries for MID/FWD) \u2014 needs 10 (GK/DEF) or 12 (MID/FWD) for the +2 bonus. \"saves\" is GK shot saves (every 3 = +1)."),
     React.createElement("div", { style: { maxHeight: 420, overflowY: "auto" } }, rows)
   );
 }
@@ -1558,9 +1594,15 @@ function AdminEntrants(props) {
 function MyTeam(props) {
   var teamsObj = props.teams || {};
   var config = props.config || {};
-  var codeArr = React.useState("");
-  var codeInput = codeArr[0];
-  var setCodeInput = codeArr[1];
+  var nameArr = React.useState("");
+  var nameInput = nameArr[0];
+  var setNameInput = nameArr[1];
+  var pinArr = React.useState("");
+  var pinInput = pinArr[0];
+  var setPinInput = pinArr[1];
+  var matchIdsArr = React.useState([]);
+  var matchIds = matchIdsArr[0];
+  var setMatchIds = matchIdsArr[1];
   var foundArr = React.useState(null);
   var foundId = foundArr[0];
   var setFoundId = foundArr[1];
@@ -1577,31 +1619,66 @@ function MyTeam(props) {
   var msg = msgArr[0];
   var setMsg = msgArr[1];
 
-  function findTeam() {
-    var code = codeInput.trim().toUpperCase();
-    if (!code) { setErr("Enter your team code."); return; }
+  function trySignIn() {
+    var name = nameInput.trim().toLowerCase();
+    var pin = pinInput.trim();
+    if (!name || !pin) { setErr("Enter your name (or team name) and your PIN."); return; }
     var ids = Object.keys(teamsObj);
-    var match = null;
+    var matches = [];
     for (var i = 0; i < ids.length; i++) {
-      if (teamsObj[ids[i]].code === code) { match = ids[i]; break; }
+      var t = teamsObj[ids[i]];
+      if (!t || (t.pin || "") !== pin) continue;
+      var entrantMatch = (t.entrantName || "").trim().toLowerCase() === name;
+      var teamMatch = (t.teamName || "").trim().toLowerCase() === name;
+      if (entrantMatch || teamMatch) matches.push(ids[i]);
     }
-    if (!match) { setErr("No team found with that code."); return; }
+    if (!matches.length) { setErr("No team found with that name and PIN."); return; }
     setErr("");
-    setFoundId(match);
+    if (matches.length === 1) {
+      setFoundId(matches[0]);
+    } else {
+      setMatchIds(matches);
+    }
+  }
+
+  if (matchIds.length > 0 && !foundId) {
+    var pickRows = matchIds.map(function (id) {
+      var t = teamsObj[id];
+      return React.createElement("div", {
+        key: id, onClick: function (tid) { return function () { setFoundId(tid); setMatchIds([]); }; }(id),
+        style: { padding: "10px 12px", borderRadius: 8, marginBottom: 6, background: "#1c3253" }
+      },
+        React.createElement("div", { style: { fontWeight: 700, fontSize: 14 } }, t.teamName),
+        React.createElement("div", { style: { fontSize: 11, opacity: 0.7 } }, t.entrantName + " \u00b7 " + t.formation)
+      );
+    });
+    return React.createElement(React.Fragment, null,
+      React.createElement(Header, { sub: "Choose a team" }),
+      React.createElement(Card, null,
+        React.createElement("div", { style: { fontSize: 12, opacity: 0.7, marginBottom: 8 } }, "You have more than one team with that name and PIN \u2014 pick which one to manage."),
+        pickRows
+      )
+    );
   }
 
   if (!foundId) {
     return React.createElement(React.Fragment, null,
       React.createElement(Header, { sub: "My team" }),
       React.createElement(Card, null,
-        React.createElement("div", { style: { fontSize: 13, marginBottom: 10 } }, "Enter the team code you were given when you submitted your team."),
+        React.createElement("div", { style: { fontSize: 13, marginBottom: 10 } }, "Sign in with your name (or your team name) and the PIN you chose when you submitted your team."),
         React.createElement("input", {
-          placeholder: "Team code", value: codeInput,
-          onChange: function (e) { setCodeInput(e.target.value); },
-          style: { width: "100%", padding: 10, borderRadius: 8, marginBottom: 10, background: "#1c3253", color: "#fff", border: "none", textTransform: "uppercase" }
+          placeholder: "Your name or team name", value: nameInput,
+          onChange: function (e) { setNameInput(e.target.value); },
+          style: { width: "100%", padding: 10, borderRadius: 8, marginBottom: 8, background: "#1c3253", color: "#fff", border: "none" }
+        }),
+        React.createElement("input", {
+          placeholder: "PIN", value: pinInput, type: "password", inputMode: "numeric",
+          onChange: function (e) { setPinInput(e.target.value); },
+          onKeyDown: function (e) { if (e.key === "Enter") trySignIn(); },
+          style: { width: "100%", padding: 10, borderRadius: 8, marginBottom: 10, background: "#1c3253", color: "#fff", border: "none" }
         }),
         err ? React.createElement("div", { style: { fontSize: 12, color: "#ff9a9a", marginBottom: 8 } }, err) : null,
-        React.createElement(Btn, { onClick: findTeam }, "Find my team")
+        React.createElement(Btn, { onClick: trySignIn }, "Sign in")
       )
     );
   }
