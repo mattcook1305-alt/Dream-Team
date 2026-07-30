@@ -1472,15 +1472,11 @@ function AdminStats(props) {
   var setSyncMsg = syncMsgArr[1];
   var statsArr = useDbValue("gwstats/gw" + gw, {});
   var statsObj = statsArr[0];
-
-  var squadPlayerIds = {};
   var teamIds = Object.keys(teamsObj || {});
-  for (var i = 0; i < teamIds.length; i++) {
-    var t = teamsObj[teamIds[i]];
-    var ids = t.playerIds || [];
-    for (var j = 0; j < ids.length; j++) squadPlayerIds[ids[j]] = true;
-  }
-  var relevantIds = Object.keys(squadPlayerIds);
+
+  var filterArr = React.useState({ pos: "ALL", club: "ALL", search: "" });
+  var filter = filterArr[0];
+  var setFilter = filterArr[1];
 
   function syncStatsFromApi() {
     var gwId = "gw" + gw;
@@ -1634,10 +1630,17 @@ function AdminStats(props) {
     recomputeResultsForGw("gw" + gw, statsObj);
   }
 
-  var rows = relevantIds.map(function (pid) {
-    var pl = PLAYERS_BY_ID[pid];
+  var filteredPlayers = ALL_PLAYERS.filter(function (p) {
+    if (filter.pos !== "ALL" && p.pos !== filter.pos) return false;
+    if (filter.club !== "ALL" && p.club !== filter.club) return false;
+    if (filter.search && p.name.toLowerCase().indexOf(filter.search.toLowerCase()) === -1) return false;
+    return true;
+  });
+
+  var rows = filteredPlayers.map(function (p) {
+    var pid = p.id;
+    var pl = p;
     var st = (statsObj && statsObj[pid]) || {};
-    if (!pl) return null;
     return React.createElement("div", { key: pid, style: { borderBottom: "1px solid #1c3253", padding: "8px 4px" } },
       React.createElement("div", { style: { fontWeight: 700, fontSize: 13, marginBottom: 4 } }, pl.name + " (" + pl.pos + ", " + pl.club + ")"),
       React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 6 } },
@@ -1666,7 +1669,24 @@ function AdminStats(props) {
       React.createElement(Btn, { variant: "ghost", onClick: computeAndSave }, "Recompute this GW only")
     ),
     syncMsg ? React.createElement("div", { style: { fontSize: 11, color: "#ffd23f", marginBottom: 8 } }, syncMsg) : null,
-    React.createElement("div", { style: { fontSize: 11, opacity: 0.7, marginBottom: 8 } }, "Only players who appear in at least one submitted squad are listed. Fields blur-save individually. \"cbit\" = combined clearances + blocks + interceptions + tackles (+ recoveries for MID/FWD) \u2014 needs 10 (GK/DEF) or 12 (MID/FWD) for the +2 bonus. \"saves\" is GK shot saves (every 3 = +1). Clean sheet is worked out automatically from goalsConceded \u2014 no separate tick needed."),
+    React.createElement("div", { style: { display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" } },
+      ["ALL", "GK", "DEF", "MID", "FWD"].map(function (p) {
+        return React.createElement("button", {
+          key: p, onClick: function (val) { return function () { setFilter(Object.assign({}, filter, { pos: val })); }; }(p),
+          style: { padding: "6px 10px", borderRadius: 8, border: "none", background: filter.pos === p ? "#ffd23f" : "#1c3253", color: filter.pos === p ? "#12233f" : "#fff", fontSize: 11, fontWeight: 700 }
+        }, p);
+      })
+    ),
+    React.createElement("select", {
+      value: filter.club, onChange: function (e) { setFilter(Object.assign({}, filter, { club: e.target.value })); },
+      style: { width: "100%", padding: 8, borderRadius: 8, marginBottom: 8, background: "#1c3253", color: "#fff", border: "none" }
+    }, [React.createElement("option", { key: "ALL", value: "ALL" }, "All clubs")].concat(ALL_CLUBS.map(function (c) { return React.createElement("option", { key: c, value: c }, c); }))),
+    React.createElement("input", {
+      placeholder: "Search player", value: filter.search,
+      onChange: function (e) { setFilter(Object.assign({}, filter, { search: e.target.value })); },
+      style: { width: "100%", padding: 8, borderRadius: 8, marginBottom: 10, background: "#1c3253", color: "#fff", border: "none" }
+    }),
+    React.createElement("div", { style: { fontSize: 11, opacity: 0.7, marginBottom: 8 } }, "Showing " + filteredPlayers.length + " of " + ALL_PLAYERS.length + " players. Fields blur-save individually. \"cbit\" = combined clearances + blocks + interceptions + tackles (+ recoveries for MID/FWD) \u2014 needs 10 (GK/DEF) or 12 (MID/FWD) for the +2 bonus. \"saves\" is GK shot saves (every 3 = +1). Clean sheet is worked out automatically from goalsConceded \u2014 no separate tick needed."),
     React.createElement("div", { style: { maxHeight: 420, overflowY: "auto" } }, rows)
   );
 }
@@ -1827,6 +1847,26 @@ function MyTeam(props) {
     }
   }, [teamsObj]);
 
+  React.useEffect(function () {
+    if (!foundId) return;
+    var t = teamsObj[foundId];
+    if (!t) return;
+    var pend = t.pendingEmergency;
+    var curGw = (config.currentGameweek) || 1;
+    if (!pend || pend.effectiveGw > curGw) return;
+    var ids = t.playerIds || [];
+    var idx = ids.indexOf(pend.outId);
+    if (idx < 0) return;
+    var newIds = ids.slice(0, idx).concat([pend.inId]).concat(ids.slice(idx + 1));
+    var entry = { type: "emergency", outId: pend.outId, inId: pend.inId, outName: pend.outName, inName: pend.inName, timestamp: nowMs() };
+    window.db.ref("teams/" + foundId).update({
+      playerIds: newIds,
+      cost: squadCost(newIds),
+      pendingEmergency: null,
+      transferLog: (t.transferLog || []).concat([entry])
+    });
+  }, [foundId, teamsObj, config]);
+
   if (matchIds.length > 0 && !foundId) {
     var pickRows = matchIds.map(function (id) {
       var t = teamsObj[id];
@@ -1886,21 +1926,6 @@ function MyTeam(props) {
   var windowTransfersLeft = CFG.transfersPerWindow - usedThisWindow;
   var emergencyAvailable = !team.emergencyUsed && !windowOpen && inAnyPeriod(emergencyPeriods, now);
   var pending = team.pendingEmergency || null;
-
-  React.useEffect(function () {
-    if (!pending || pending.effectiveGw > currentGw) return;
-    var ids = team.playerIds || [];
-    var idx = ids.indexOf(pending.outId);
-    if (idx < 0) return;
-    var newIds = ids.slice(0, idx).concat([pending.inId]).concat(ids.slice(idx + 1));
-    var entry = { type: "emergency", outId: pending.outId, inId: pending.inId, outName: pending.outName, inName: pending.inName, timestamp: nowMs() };
-    window.db.ref("teams/" + foundId).update({
-      playerIds: newIds,
-      cost: squadCost(newIds),
-      pendingEmergency: null,
-      transferLog: (team.transferLog || []).concat([entry])
-    });
-  }, [foundId, currentGw, pending && pending.effectiveGw]);
 
   if (editing) {
     return React.createElement(TeamBuilder, {
