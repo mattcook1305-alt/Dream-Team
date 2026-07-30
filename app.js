@@ -40,12 +40,13 @@ function computeScore(stat, pos) {
   else if (pos === "MID") pts += goals * 5;
   else if (pos === "FWD") pts += goals * 4;
 
+  var gc = stat.goalsConceded || 0;
+  var cleanSheet = gc === 0;
   if (pos === "GK" || pos === "DEF") {
-    if (stat.cleanSheet) pts += 4;
-    var gc = stat.goalsConceded || 0;
+    if (cleanSheet) pts += 4;
     pts -= Math.max(0, gc - 1);
   } else if (pos === "MID") {
-    if (stat.cleanSheet) pts += 1;
+    if (cleanSheet) pts += 1;
   }
 
   if (pos === "GK") {
@@ -257,13 +258,11 @@ function mapSofaLineupsToUpdates(lineupData, homeConceded, awayConceded, homeTea
       var tackles = statNum(stat, ["totalTackle", "tackle"]);
       var recoveries = (localP.pos === "MID" || localP.pos === "FWD") ? statNum(stat, ["ballRecovery", "possessionWonAttThird"]) : 0;
       var cbit = clearances + blocks + interceptions + tackles + recoveries;
-      var goalsConcededVal = (localP.pos === "DEF" || localP.pos === "GK") ? (conceded || 0) : 0;
-      var cleanSheet = conceded === 0;
       updates[localP.id] = {
         mins: mins, goals: goals, assists: assists, yellow: yellow, red: red, ownGoals: ownGoals,
         cbit: cbit, saves: saves,
         penSaveGK: penSaveGK, penMissTaker: penMissTaker,
-        goalsConceded: goalsConcededVal, cleanSheet: cleanSheet
+        goalsConceded: (conceded || 0)
       };
     }
   }
@@ -317,13 +316,11 @@ function mapApiStatsToUpdates(matches, apiDataByFixture) {
         var tackles = (statBlock.tackles && statBlock.tackles.total) || 0;
         var penSaveGK = (statBlock.penalty && statBlock.penalty.saved) || 0;
         var penMissTaker = (statBlock.penalty && statBlock.penalty.missed) || 0;
-        var goalsConcededVal = (localP.pos === "DEF" || localP.pos === "GK") ? (concededScore || 0) : 0;
-        var cleanSheet = concededScore === 0;
         updates[localP.id] = {
           mins: mins, goals: goals, assists: assists, yellow: yellow, red: red,
           shotsOnTarget: shotsOnTarget, tackles: tackles,
           penSaveGK: penSaveGK, penMissTaker: penMissTaker,
-          goalsConceded: goalsConcededVal, cleanSheet: cleanSheet
+          goalsConceded: (concededScore || 0)
         };
       }
     }
@@ -619,7 +616,7 @@ function groupByPos(ids) {
 
 function TeamBuilder(props) {
   var players = props.players;
-  var stateArr = React.useState([]);
+  var stateArr = React.useState(props.initialSelected ? props.initialSelected.slice() : []);
   var selected = stateArr[0];
   var setSelected = stateArr[1];
   var preferredArr = React.useState(null);
@@ -698,6 +695,16 @@ function TeamBuilder(props) {
   function submitTeam() {
     if (selected.length !== CFG.squadSize) { setMsg("Fill every position first."); return; }
     var finalFormation = matchesFormation(counts) || displayFormation;
+    if (props.mode === "edit") {
+      window.db.ref("teams/" + props.teamId).update({
+        formation: finalFormation,
+        playerIds: selected,
+        cost: cost
+      }).then(function () {
+        if (props.onSaved) props.onSaved();
+      });
+      return;
+    }
     var reg = props.regInfo || {};
     var newRef = window.db.ref("teams").push();
     var code = newRef.key.slice(-6).toUpperCase();
@@ -713,7 +720,7 @@ function TeamBuilder(props) {
       emergencyUsed: false,
       pendingEmergency: null,
       transferLog: [],
-      paid: false,
+      payments: { a: false, b: false, c: false },
       cost: cost,
       createdAt: Date.now()
     }).then(function () {
@@ -906,16 +913,19 @@ function TeamBuilder(props) {
   var footer = null;
   if (selected.length === CFG.squadSize) {
     footer = React.createElement(Card, null,
-      React.createElement("div", { style: { fontSize: 13, marginBottom: 10 } }, "Team: " + ((props.regInfo && props.regInfo.teamName) || "") + " \u00b7 Manager: " + ((props.regInfo && props.regInfo.entrantName) || "")),
+      props.mode === "edit" ? null : React.createElement("div", { style: { fontSize: 13, marginBottom: 10 } }, "Team: " + ((props.regInfo && props.regInfo.teamName) || "") + " \u00b7 Manager: " + ((props.regInfo && props.regInfo.entrantName) || "")),
       msg ? React.createElement("div", { style: { fontSize: 12, color: "#ffd23f", marginBottom: 8 } }, msg) : null,
-      React.createElement(Btn, { onClick: submitTeam }, "Submit team (\u00a3" + CFG.entryFee + " entry)")
+      React.createElement(Btn, { onClick: submitTeam }, props.mode === "edit" ? "Save team" : ("Submit team (\u00a3" + CFG.entryFee + " entry)"))
     );
   } else if (msg) {
     footer = React.createElement(Card, null, React.createElement("div", { style: { fontSize: 12, color: "#ffd23f" } }, msg));
   }
 
   return React.createElement(React.Fragment, null,
-    React.createElement(Header, { sub: "Build your team" }),
+    React.createElement(Header, { sub: props.mode === "edit" ? "Edit your team" : "Build your team" }),
+    props.mode === "edit" && props.onCancel
+      ? React.createElement(Card, null, React.createElement(Btn, { variant: "ghost", onClick: props.onCancel }, "\u2190 Cancel, discard changes"))
+      : null,
     summary,
     mainContent,
     footer
@@ -1047,16 +1057,64 @@ function fmtFixtureDate(d) {
 
 function Fixtures(props) {
   var fixturesObj = props.fixtures;
+  var gwstatsObj = props.gwstats || {};
+  var selArr = React.useState(null);
+  var selMatch = selArr[0];
+  var setSelMatch = selArr[1];
+
   var gwKeys = Object.keys(fixturesObj || {}).sort(function (a, b) {
     var ga = (fixturesObj[a] && fixturesObj[a].gw) || 0;
     var gb = (fixturesObj[b] && fixturesObj[b].gw) || 0;
     return ga - gb;
   });
+
+  if (selMatch) {
+    var statsForGw = gwstatsObj[selMatch.gwId] || {};
+    var synced = Object.keys(statsForGw).length > 0;
+    var sides = [
+      { label: selMatch.match.home, club: selMatch.match.home },
+      { label: selMatch.match.away, club: selMatch.match.away }
+    ];
+    var sideBlocks = sides.map(function (side) {
+      var clubPlayers = ALL_PLAYERS.filter(function (p) { return p.club === side.club; });
+      var rows = clubPlayers.map(function (p) {
+        var st = statsForGw[p.id];
+        if (!st) return null;
+        var sc = computeScore(st, p.pos);
+        return React.createElement("div", { key: p.id, style: { display: "flex", justifyContent: "space-between", padding: "5px 4px", borderBottom: "1px solid #1c3253", fontSize: 13 } },
+          React.createElement("span", null, p.name + " (" + p.pos + ")"),
+          React.createElement("b", { style: { color: "#ffd23f" } }, sc)
+        );
+      }).filter(function (r) { return r; });
+      return React.createElement("div", { key: side.club, style: { marginBottom: 14 } },
+        React.createElement("div", { style: { fontWeight: 700, marginBottom: 6 } }, side.club),
+        rows.length ? rows : React.createElement("div", { style: { fontSize: 12, opacity: 0.6 } }, "No synced stats for this club yet.")
+      );
+    });
+    return React.createElement(React.Fragment, null,
+      React.createElement(Header, { sub: selMatch.match.home + " v " + selMatch.match.away }),
+      React.createElement(Card, null,
+        React.createElement(Btn, { variant: "ghost", onClick: function () { setSelMatch(null); } }, "\u2190 Back to fixtures"),
+        React.createElement("div", { style: { marginTop: 10 } },
+          !synced
+            ? React.createElement("div", { style: { fontSize: 13, opacity: 0.7 } }, "Stats for this gameweek haven't been synced yet.")
+            : sideBlocks
+        )
+      )
+    );
+  }
+
   var blocks = gwKeys.map(function (gwId) {
     var gw = fixturesObj[gwId];
+    var hasStats = Object.keys(gwstatsObj[gwId] || {}).length > 0;
     var matches = (gw.matches || []).map(function (m, i) {
-      return React.createElement("div", { key: i, style: { display: "flex", justifyContent: "space-between", fontSize: 13, padding: "4px 0" } },
-        React.createElement("span", null, m.home + " v " + m.away),
+      var clickable = m.status === "FINISHED" && hasStats;
+      return React.createElement("div", {
+        key: i,
+        onClick: clickable ? function (gwid, match) { return function () { setSelMatch({ gwId: gwid, match: match }); }; }(gwId, m) : undefined,
+        style: { display: "flex", justifyContent: "space-between", fontSize: 13, padding: "6px 4px", borderRadius: 6, background: clickable ? "#1c3253" : "transparent", marginBottom: 2 }
+      },
+        React.createElement("span", null, m.home + " v " + m.away + (m.status === "FINISHED" ? (" (" + (m.homeScore != null ? m.homeScore : "?") + "-" + (m.awayScore != null ? m.awayScore : "?") + ")") : "")),
         React.createElement("span", { style: { opacity: 0.7 } }, fmtFixtureDate(m.date))
       );
     });
@@ -1067,7 +1125,8 @@ function Fixtures(props) {
   });
   return React.createElement(React.Fragment, null,
     React.createElement(Header, { sub: "Fixtures" }),
-    gwKeys.length ? blocks : React.createElement(Card, null, React.createElement("div", { style: { opacity: 0.7, fontSize: 13 } }, "No fixtures added yet."))
+    gwKeys.length ? blocks : React.createElement(Card, null, React.createElement("div", { style: { opacity: 0.7, fontSize: 13 } }, "No fixtures added yet.")),
+    gwKeys.length ? React.createElement("div", { style: { fontSize: 11, opacity: 0.6, padding: "0 14px 14px" } }, "Finished matches with synced stats are tappable to see every player's score.") : null
   );
 }
 
@@ -1381,13 +1440,16 @@ function AdminStats(props) {
         writes.push(window.db.ref("gwstats/" + gwId + "/" + pid2).update(allUpdates[pid2]));
       }
       Promise.all(writes).then(function () {
-        var msg = "Matched " + totalMatched + " players from SofaScore.";
-        if (allUnmatched.length) {
-          msg += " Couldn't match: " + allUnmatched.slice(0, 8).join(", ") + (allUnmatched.length > 8 ? " +" + (allUnmatched.length - 8) + " more" : "") + " \u2014 enter these manually below.";
-        }
-        if (errors.length) msg += " Errors: " + errors.join(" | ");
-        msg += " Bonus points still need entering manually.";
-        setSyncMsg(msg);
+        var statsForGwLocal = Object.assign({}, statsObj, allUpdates);
+        return recomputeResultsForGw(gwId, statsForGwLocal).then(function () {
+          var msg = "Matched " + totalMatched + " players from SofaScore. Scores recalculated.";
+          if (allUnmatched.length) {
+            msg += " Couldn't match: " + allUnmatched.slice(0, 8).join(", ") + (allUnmatched.length > 8 ? " +" + (allUnmatched.length - 8) + " more" : "") + " \u2014 enter these manually below.";
+          }
+          if (errors.length) msg += " Errors: " + errors.join(" | ");
+          msg += " Bonus points still need entering manually.";
+          setSyncMsg(msg);
+        });
       });
     }).catch(function (e) {
       setSyncMsg("Sync failed: " + (e && e.message ? e.message : e));
@@ -1423,7 +1485,7 @@ function AdminStats(props) {
     setSyncMsg("Fetching fixtures...");
     fetchApiFixtures("PL", "2026").then(function (byGw) {
       var gwKeys = Object.keys(byGw);
-      if (!gwKeys.length) { setSyncMsg("No fixtures returned from the API."); return; }
+      if (!gwKeys.length) { setSyncMsg("No fixtures returned from the API."); return null; }
       var fixtureWrites = [];
       for (var i = 0; i < gwKeys.length; i++) fixtureWrites.push(window.db.ref("fixtures/" + gwKeys[i]).set(byGw[gwKeys[i]]));
       return Promise.all(fixtureWrites).then(function () {
@@ -1432,47 +1494,55 @@ function AdminStats(props) {
           var finished = byGw[gwKeys[gk]].matches.filter(function (m) { return m.status === "FINISHED"; });
           if (finished.length) finishedByGw[gwKeys[gk]] = finished;
         }
-        var finishedGwKeys = Object.keys(finishedByGw);
-        if (!finishedGwKeys.length) {
+        var finishedGwKeysAll = Object.keys(finishedByGw);
+        if (!finishedGwKeysAll.length) {
           setSyncMsg("Fixtures synced (" + gwKeys.length + " gameweeks). No finished matches yet to pull stats for.");
           return null;
         }
-        setSyncMsg("Fetching SofaScore stats for " + finishedGwKeys.length + " finished gameweek(s)...");
-        var gwPromises = finishedGwKeys.map(function (gwId3) {
-          var ms = finishedByGw[gwId3];
-          var matchPromises = ms.map(function (m) {
-            return fetchSofaScoreStatsForFixture(m.date, m.home, m.away).catch(function (e) {
-              return { updates: {}, matchedCount: 0, unmatchedNames: [], error: (m.home + " v " + m.away + ": " + (e && e.message ? e.message : e)) };
+        return window.db.ref("results").once("value").then(function (snap) {
+          var already = snap.val() || {};
+          var finishedGwKeys = finishedGwKeysAll.filter(function (k) { return !already[k]; });
+          if (!finishedGwKeys.length) {
+            setSyncMsg("Fixtures synced (" + gwKeys.length + " gameweeks). All finished gameweeks are already synced \u2014 previous games left untouched. Use \"Sync stats for this GW only\" to force a re-check on a specific week.");
+            return null;
+          }
+          setSyncMsg("Fetching SofaScore stats for " + finishedGwKeys.length + " finished gameweek(s)...");
+          var gwPromises = finishedGwKeys.map(function (gwId3) {
+            var ms = finishedByGw[gwId3];
+            var matchPromises = ms.map(function (m) {
+              return fetchSofaScoreStatsForFixture(m.date, m.home, m.away).catch(function (e) {
+                return { updates: {}, matchedCount: 0, unmatchedNames: [], error: (m.home + " v " + m.away + ": " + (e && e.message ? e.message : e)) };
+              });
+            });
+            return Promise.all(matchPromises).then(function (results) {
+              var statsForGwLocal = {};
+              var matched = 0;
+              var unmatched = 0;
+              for (var ri = 0; ri < results.length; ri++) {
+                matched += results[ri].matchedCount;
+                unmatched += results[ri].unmatchedNames.length;
+                for (var pid in results[ri].updates) statsForGwLocal[pid] = results[ri].updates[pid];
+              }
+              return { gwId: gwId3, stats: statsForGwLocal, matched: matched, unmatched: unmatched };
             });
           });
-          return Promise.all(matchPromises).then(function (results) {
-            var statsForGwLocal = {};
-            var matched = 0;
-            var unmatched = 0;
-            for (var ri = 0; ri < results.length; ri++) {
-              matched += results[ri].matchedCount;
-              unmatched += results[ri].unmatchedNames.length;
-              for (var pid in results[ri].updates) statsForGwLocal[pid] = results[ri].updates[pid];
+          return Promise.all(gwPromises).then(function (gwResults) {
+            var totalMatched = 0;
+            var totalUnmatched = 0;
+            var statWrites = [];
+            for (var g = 0; g < gwResults.length; g++) {
+              totalMatched += gwResults[g].matched;
+              totalUnmatched += gwResults[g].unmatched;
+              for (var pid2 in gwResults[g].stats) {
+                statWrites.push(window.db.ref("gwstats/" + gwResults[g].gwId + "/" + pid2).update(gwResults[g].stats[pid2]));
+              }
             }
-            return { gwId: gwId3, stats: statsForGwLocal, matched: matched, unmatched: unmatched };
-          });
-        });
-        return Promise.all(gwPromises).then(function (gwResults) {
-          var totalMatched = 0;
-          var totalUnmatched = 0;
-          var statWrites = [];
-          for (var g = 0; g < gwResults.length; g++) {
-            totalMatched += gwResults[g].matched;
-            totalUnmatched += gwResults[g].unmatched;
-            for (var pid2 in gwResults[g].stats) {
-              statWrites.push(window.db.ref("gwstats/" + gwResults[g].gwId + "/" + pid2).update(gwResults[g].stats[pid2]));
-            }
-          }
-          setSyncMsg("Saving scores...");
-          return Promise.all(statWrites).then(function () {
-            var resultWrites = gwResults.map(function (r) { return recomputeResultsForGw(r.gwId, r.stats); });
-            return Promise.all(resultWrites).then(function () {
-              setSyncMsg("Done. " + gwKeys.length + " gameweeks of fixtures, stats pulled for " + finishedGwKeys.length + " finished gameweek(s), " + totalMatched + " players matched" + (totalUnmatched ? (", " + totalUnmatched + " unmatched (check per-gameweek view)") : "") + ". Bonus still needs entering by hand.");
+            setSyncMsg("Saving scores...");
+            return Promise.all(statWrites).then(function () {
+              var resultWrites = gwResults.map(function (r) { return recomputeResultsForGw(r.gwId, r.stats); });
+              return Promise.all(resultWrites).then(function () {
+                setSyncMsg("Done. " + gwKeys.length + " gameweeks of fixtures, stats pulled for " + finishedGwKeys.length + " finished gameweek(s), " + totalMatched + " players matched" + (totalUnmatched ? (", " + totalUnmatched + " unmatched (check per-gameweek view)") : "") + ". Bonus still needs entering by hand.");
+              });
             });
           });
         });
@@ -1483,7 +1553,7 @@ function AdminStats(props) {
   }
 
   function updateStat(pid, field, value) {
-    var num = field === "cleanSheet" || field === "red" ? value : parseFloat(value || "0");
+    var num = field === "red" ? value : parseFloat(value || "0");
     window.db.ref("gwstats/gw" + gw + "/" + pid).update((function () {
       var o = {}; o[field] = num; return o;
     })());
@@ -1529,10 +1599,6 @@ function AdminStats(props) {
           });
         }),
         React.createElement("label", { style: { fontSize: 11, display: "flex", alignItems: "center", gap: 4 } },
-          React.createElement("input", { type: "checkbox", defaultChecked: !!st.cleanSheet, onChange: function (e) { updateStat(pid, "cleanSheet", e.target.checked); } }),
-          "CS"
-        ),
-        React.createElement("label", { style: { fontSize: 11, display: "flex", alignItems: "center", gap: 4 } },
           React.createElement("input", { type: "checkbox", defaultChecked: !!st.red, onChange: function (e) { updateStat(pid, "red", e.target.checked); } }),
           "Red"
         )
@@ -1550,7 +1616,7 @@ function AdminStats(props) {
       React.createElement(Btn, { variant: "ghost", onClick: computeAndSave }, "Recompute this GW only")
     ),
     syncMsg ? React.createElement("div", { style: { fontSize: 11, color: "#ffd23f", marginBottom: 8 } }, syncMsg) : null,
-    React.createElement("div", { style: { fontSize: 11, opacity: 0.7, marginBottom: 8 } }, "Only players who appear in at least one submitted squad are listed. Fields blur-save individually. \"cbit\" = combined clearances + blocks + interceptions + tackles (+ recoveries for MID/FWD) \u2014 needs 10 (GK/DEF) or 12 (MID/FWD) for the +2 bonus. \"saves\" is GK shot saves (every 3 = +1)."),
+    React.createElement("div", { style: { fontSize: 11, opacity: 0.7, marginBottom: 8 } }, "Only players who appear in at least one submitted squad are listed. Fields blur-save individually. \"cbit\" = combined clearances + blocks + interceptions + tackles (+ recoveries for MID/FWD) \u2014 needs 10 (GK/DEF) or 12 (MID/FWD) for the +2 bonus. \"saves\" is GK shot saves (every 3 = +1). Clean sheet is worked out automatically from goalsConceded \u2014 no separate tick needed."),
     React.createElement("div", { style: { maxHeight: 420, overflowY: "auto" } }, rows)
   );
 }
@@ -1564,8 +1630,8 @@ function AdminEntrants(props) {
   var gwArr = useDbValue("config/currentGameweek", 1);
   var currentGw = gwArr[0];
 
-  function togglePaid(tid, current) {
-    window.db.ref("teams/" + tid).update({ paid: !current });
+  function togglePayment(tid, key, current) {
+    window.db.ref("teams/" + tid + "/payments").update((function () { var o = {}; o[key] = !current; return o; })());
   }
 
   function applyDueEmergencyTransfers() {
@@ -1639,33 +1705,48 @@ function AdminEntrants(props) {
 
   var paidCount = 0;
   for (var pc = 0; pc < teamIds.length; pc++) {
-    if (teamsObj[teamIds[pc]].paid) paidCount++;
+    var pmt = teamIds[pc] && teamsObj[teamIds[pc]].payments;
+    if (pmt && pmt.a && pmt.b && pmt.c) paidCount++;
   }
 
   var rows = teamIds.map(function (tid) {
     var t = teamsObj[tid];
-    var isPaid = !!t.paid;
+    var pmt = t.payments || {};
+    var totalPaid = (pmt.a ? 40 : 0) + (pmt.b ? 20 : 0) + (pmt.c ? 20 : 0);
     var emStatus = "not used";
     if (t.pendingEmergency) emStatus = "pending, effective GW" + t.pendingEmergency.effectiveGw;
     else if (t.emergencyUsed) emStatus = "used";
-    return React.createElement("div", { key: tid, style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 4px", borderBottom: "1px solid #1c3253", fontSize: 12 } },
-      React.createElement("div", null,
-        React.createElement("b", null, t.teamName), " \u2014 ", t.entrantName, " \u00b7 ", t.formation, " \u00b7 ", fmtMoney(t.cost || 0),
-        React.createElement("div", { style: { opacity: 0.6, fontSize: 11 } }, "transfers logged: ", (t.transferLog || []).length, " \u00b7 emergency: ", emStatus)
-      ),
-      React.createElement("button", {
-        onClick: function (id, cur) { return function () { togglePaid(id, cur); }; }(tid, isPaid),
+    var payButtons = [
+      { key: "a", label: "\u00a340" },
+      { key: "b", label: "\u00a320" },
+      { key: "c", label: "\u00a320" }
+    ].map(function (p) {
+      var on = !!pmt[p.key];
+      return React.createElement("button", {
+        key: p.key,
+        onClick: function (id, k, cur) { return function () { togglePayment(id, k, cur); }; }(tid, p.key, on),
         style: {
-          padding: "5px 10px", borderRadius: 8, border: "none", fontWeight: 700, fontSize: 11,
-          background: isPaid ? "#2c5f2d" : "#c0392b", color: "#fff", flexShrink: 0, marginLeft: 8
+          padding: "5px 8px", borderRadius: 8, border: "none", fontWeight: 700, fontSize: 11,
+          background: on ? "#2c5f2d" : "#c0392b", color: "#fff", marginLeft: 4
         }
-      }, isPaid ? "Paid" : "Not paid")
+      }, p.label);
+    });
+    return React.createElement("div", { key: tid, style: { padding: "8px 4px", borderBottom: "1px solid #1c3253", fontSize: 12 } },
+      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 4 } },
+        React.createElement("div", null,
+          React.createElement("b", null, t.teamName), " \u2014 ", t.entrantName, " \u00b7 ", t.formation, " \u00b7 ", fmtMoney(t.cost || 0)
+        ),
+        React.createElement("div", { style: { display: "flex", alignItems: "center" } }, payButtons)
+      ),
+      React.createElement("div", { style: { opacity: 0.6, fontSize: 11, marginTop: 4 } },
+        "Paid \u00a3" + totalPaid + " of \u00a380 \u00b7 transfers logged: ", (t.transferLog || []).length, " \u00b7 emergency: ", emStatus
+      )
     );
   });
 
   return React.createElement(Card, null,
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 6 } },
-      React.createElement("div", { style: { fontWeight: 700 } }, "Entrants (" + teamIds.length + " teams, " + paidCount + " paid)"),
+      React.createElement("div", { style: { fontWeight: 700 } }, "Entrants (" + teamIds.length + " teams, " + paidCount + " fully paid)"),
       React.createElement("div", { style: { display: "flex", gap: 6 } },
         React.createElement(Btn, { variant: "ghost", onClick: applyDueEmergencyTransfers }, "Apply due emergency transfers"),
         React.createElement(Btn, { variant: "ghost", onClick: syncAll }, "Sync scores")
@@ -1699,6 +1780,12 @@ function MyTeam(props) {
   var outArr = React.useState(null);
   var outId = outArr[0];
   var setOutId = outArr[1];
+  var editingArr = React.useState(false);
+  var editing = editingArr[0];
+  var setEditing = editingArr[1];
+  var squadViewArr = React.useState("list");
+  var squadView = squadViewArr[0];
+  var setSquadView = squadViewArr[1];
   var modeArr = React.useState(null);
   var mode = modeArr[0];
   var setMode = modeArr[1];
@@ -1789,6 +1876,8 @@ function MyTeam(props) {
 
   var team = teamsObj[foundId];
   var now = nowMs();
+  var deadlineMs = new Date(CFG.entryDeadline + "T23:59:59").getTime();
+  var preSeasonUnlimited = now < deadlineMs;
   var windows = config.transferWindows || CFG.transferWindows;
   var emergencyPeriods = config.emergencyWindows || CFG.emergencyWindows;
   var currentGw = config.currentGameweek || 1;
@@ -1802,6 +1891,15 @@ function MyTeam(props) {
   var windowTransfersLeft = CFG.transfersPerWindow - usedThisWindow;
   var emergencyAvailable = !team.emergencyUsed && !windowOpen && inAnyPeriod(emergencyPeriods, now);
   var pending = team.pendingEmergency || null;
+
+  if (editing) {
+    return React.createElement(TeamBuilder, {
+      players: ALL_PLAYERS, gwstats: props.gwstats,
+      mode: "edit", teamId: foundId, initialSelected: team.playerIds || [],
+      onSaved: function () { setEditing(false); },
+      onCancel: function () { setEditing(false); }
+    });
+  }
 
   function doRemove(id) { setOutId(id); setMode(null); }
 
@@ -1891,7 +1989,34 @@ function MyTeam(props) {
     );
   });
 
+  var groupedSquad = groupByPos(team.playerIds || []);
+  var pitchRowsSquad = POS_ORDER.map(function (pos) {
+    var chips = groupedSquad[pos].map(function (id) {
+      var pl = PLAYERS_BY_ID[id];
+      if (!pl) return null;
+      var isOut = outId === id;
+      return React.createElement("div", {
+        key: id, onClick: function (pid) { return function () { doRemove(pid); }; }(id),
+        style: { background: isOut ? "#c0392b" : "#274b8c", borderRadius: 10, padding: "8px 6px", textAlign: "center", flex: 1, minWidth: 78, margin: 3 }
+      },
+        React.createElement("div", { style: { fontSize: 12, fontWeight: 700 } }, pl.name),
+        React.createElement("div", { style: { fontSize: 10, opacity: 0.8 } }, pl.club),
+        React.createElement("div", { style: { fontSize: 11, color: "#ffd23f", fontWeight: 700 } }, fmtMoney(pl.price))
+      );
+    });
+    return React.createElement("div", { key: pos, style: { marginBottom: 10 } },
+      React.createElement("div", { style: { fontSize: 11, opacity: 0.7, marginBottom: 4, marginLeft: 4 } }, POS_LABEL[pos]),
+      React.createElement("div", { style: { display: "flex", flexWrap: "wrap" } }, chips)
+    );
+  });
+  var squadPitchView = React.createElement("div", {
+    style: { background: "linear-gradient(180deg,#1d5c2e,#164623)", borderRadius: 16, margin: "0 0 10px", padding: "14px 8px" }
+  }, pitchRowsSquad);
+
   var statusLines = [];
+  if (preSeasonUnlimited) {
+    statusLines.push(React.createElement("div", { key: "unlimited", style: { fontSize: 12, color: "#6fcf6f", marginBottom: 6 } }, "Unlimited changes available until midnight on the 16th August \u2014 use Edit team below."));
+  }
   if (pending) {
     statusLines.push(React.createElement("div", { key: "pend", style: { fontSize: 12, color: "#ffd23f", marginBottom: 6 } },
       "Emergency transfer pending: " + pending.outName + " \u2192 " + pending.inName + ", effective from Gameweek " + pending.effectiveGw + " kick-off."));
@@ -1900,10 +2025,12 @@ function MyTeam(props) {
   } else if (emergencyAvailable) {
     statusLines.push(React.createElement("div", { key: "avail", style: { fontSize: 12, color: "#6fcf6f", marginBottom: 6 } }, "Emergency transfer available."));
   }
-  if (windowOpen) {
-    statusLines.push(React.createElement("div", { key: "win", style: { fontSize: 12, color: "#6fcf6f", marginBottom: 6 } }, windows[winIdx].label + " is open \u2014 " + windowTransfersLeft + " of " + CFG.transfersPerWindow + " transfers left."));
-  } else {
-    statusLines.push(React.createElement("div", { key: "nowin", style: { fontSize: 12, opacity: 0.7, marginBottom: 6 } }, "No transfer window currently open."));
+  if (!preSeasonUnlimited) {
+    if (windowOpen) {
+      statusLines.push(React.createElement("div", { key: "win", style: { fontSize: 12, color: "#6fcf6f", marginBottom: 6 } }, windows[winIdx].label + " is open \u2014 " + windowTransfersLeft + " of " + CFG.transfersPerWindow + " transfers left."));
+    } else {
+      statusLines.push(React.createElement("div", { key: "nowin", style: { fontSize: 12, opacity: 0.7, marginBottom: 6 } }, "No transfer window currently open."));
+    }
   }
 
   return React.createElement(React.Fragment, null,
@@ -1911,11 +2038,15 @@ function MyTeam(props) {
     React.createElement(Card, null,
       React.createElement("div", { style: { fontSize: 13, marginBottom: 4 } }, team.entrantName + " \u00b7 " + team.formation + " \u00b7 " + fmtMoney(team.cost || 0)),
       statusLines,
-      React.createElement(Btn, { variant: "ghost", onClick: signOut }, "Sign out")
+      React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
+        preSeasonUnlimited ? React.createElement(Btn, { onClick: function () { setEditing(true); } }, "Edit team") : null,
+        React.createElement(Btn, { variant: "ghost", onClick: function () { setSquadView(squadView === "list" ? "pitch" : "list"); } }, squadView === "list" ? "Pitch view" : "List view"),
+        React.createElement(Btn, { variant: "ghost", onClick: signOut }, "Sign out")
+      )
     ),
     React.createElement(Card, null,
       React.createElement("div", { style: { fontSize: 12, opacity: 0.7, marginBottom: 8 } }, outId ? "Tap a replacement type below, or tap another player to change your out choice." : "Tap a player to transfer them out."),
-      squadRows,
+      squadView === "list" ? squadRows : squadPitchView,
       outId ? React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 10 } },
         windowOpen && windowTransfersLeft > 0 ? React.createElement(Btn, { onClick: function () { startTransfer("window"); } }, "Use window transfer") : null,
         emergencyAvailable ? React.createElement(Btn, { variant: "danger", onClick: function () { startTransfer("emergency"); } }, "Use emergency transfer") : null
@@ -2086,9 +2217,9 @@ function App() {
     players: ALL_PLAYERS, gwstats: gwstats, regInfo: regInfo,
     onSubmitted: function () { setRegInfo(null); setTab("myteam"); }
   });
-  else if (tab === "myteam") body = React.createElement(MyTeam, { teams: teams, config: config });
+  else if (tab === "myteam") body = React.createElement(MyTeam, { teams: teams, config: config, gwstats: gwstats });
   else if (tab === "table") body = React.createElement(LeagueTable, { teams: teams, results: results, gwstats: gwstats });
-  else if (tab === "fixtures") body = React.createElement(Fixtures, { fixtures: fixtures });
+  else if (tab === "fixtures") body = React.createElement(Fixtures, { fixtures: fixtures, gwstats: gwstats });
   else if (tab === "scores") body = React.createElement(PlayersScoresTab, { gwstats: gwstats });
   else if (tab === "rules") body = React.createElement(RulesTab, null);
   else if (tab === "admin") body = React.createElement(AdminTab, { teams: teams, fixtures: fixtures, playersDb: playersDb });
