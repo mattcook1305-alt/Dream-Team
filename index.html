@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
+<title>Grzegorz Lutecki Dream Team</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1a2a4a">
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; background: #0e1b33; color: #f2f4f8; font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; }
+  #root { min-height: 100vh; padding-bottom: 70px; }
+  a { color: inherit; }
+  input, select, button { font-family: inherit; }
+  ::-webkit-scrollbar { display: none; }
+</style>
+</head>
+<body>
+<div id="dt-error-banner" style="display:none; position:fixed; top:0; left:0; right:0; z-index:999; background:#c0392b; color:#fff; font-size:12px; padding:8px 10px; word-break:break-word;"></div>
+<div id="root">Loading Dream Team...</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="players-data.js?v=3"></script>
+<script src="rules-data.js?v=3"></script>
+
+<script>
+window.firebaseConfig = {
+  apiKey: "AIzaSyCpWS33J_OGTICdSlOkRVzS3zXQORTKl0E",
+  authDomain: "dream-team-d7ba9.firebaseapp.com",
+  databaseURL: "https://dream-team-d7ba9-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "dream-team-d7ba9",
+  storageBucket: "dream-team-d7ba9.firebasestorage.app",
+  messagingSenderId: "234796329936",
+  appId: "1:234796329936:web:fa19d9131483705eab27d5"
+};
+window.DT_FIREBASE_OK = true;
+function dtNoopRef() {
+  var chain = {};
+  chain.on = function () { return chain; };
+  chain.off = function () { return chain; };
+  chain.once = function () { return Promise.resolve({ exists: function () { return false; }, val: function () { return null; } }); };
+  chain.set = function () { return Promise.reject(new Error("Firebase is not configured yet - paste your project keys into index.html")); };
+  chain.update = function () { return Promise.reject(new Error("Firebase is not configured yet - paste your project keys into index.html")); };
+  chain.push = function () { return chain; };
+  return chain;
+}
+try {
+  firebase.initializeApp(window.firebaseConfig);
+  window.db = firebase.database();
+} catch (e) {
+  window.DT_FIREBASE_OK = false;
+  window.DT_FIREBASE_ERROR = String(e && e.message ? e.message : e);
+  window.db = { ref: dtNoopRef };
+}
+window.addEventListener("error", function (e) {
+  var el = document.getElementById("dt-error-banner");
+  if (!el) return;
+  el.style.display = "block";
+  el.innerText = "App error: " + (e.message || "unknown error") + (e.filename ? (" (" + e.filename.split("/").pop() + ":" + e.lineno + ")") : "");
+});
+</script>
+
+<script type="text/babel" src="app.js?v=3"></script>
+
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", function () {
+    navigator.serviceWorker.register("sw.js").then(function (reg) {
+      reg.update();
+    }).catch(function (e) {
+      console.log("SW registration failed", e);
+    });
+  });
+  var dtReloaded = false;
+  navigator.serviceWorker.addEventListener("controllerchange", function () {
+    if (dtReloaded) return;
+    dtReloaded = true;
+    window.location.reload();
+  });
+}
+</script>
+</body>
+</html>
