@@ -683,6 +683,11 @@ function groupByPos(ids) {
   return g;
 }
 
+function sortIdsByPos(ids) {
+  var g = groupByPos(ids);
+  return g.GK.concat(g.DEF).concat(g.MID).concat(g.FWD);
+}
+
 function TeamBuilder(props) {
   var players = props.players;
   var stateArr = React.useState(props.initialSelected ? props.initialSelected.slice() : []);
@@ -1012,6 +1017,7 @@ function LeagueTable(props) {
   var resultsObj = props.results || {};
   var gwstatsObj = props.gwstats || {};
   var teamIds = Object.keys(teamsObj || {});
+  var isAdmin = dtLoadAdmin();
 
   var gwOptionsArr = Object.keys(resultsObj).map(function (k) {
     return parseInt(k.replace("gw", ""), 10);
@@ -1046,7 +1052,7 @@ function LeagueTable(props) {
   }
   rowsData.sort(function (a, b) { return b.score - a.score; });
 
-  if (detailTeam) {
+  if (detailTeam && isAdmin) {
     var team = teamsObj[detailTeam];
     var body;
     if (gwSel === "overall") {
@@ -1061,7 +1067,7 @@ function LeagueTable(props) {
       body = histRows.length ? histRows : React.createElement("div", { style: { fontSize: 13, opacity: 0.7 } }, "No gameweeks scored yet.");
     } else {
       var statsForGw = gwstatsObj["gw" + gwSel] || {};
-      var pids = effectiveSquad(team, gwSel);
+      var pids = sortIdsByPos(effectiveSquad(team, gwSel));
       var playerRows = pids.map(function (pid) {
         var pl = PLAYERS_BY_ID[pid];
         if (!pl) return null;
@@ -1073,7 +1079,7 @@ function LeagueTable(props) {
       });
       body = playerRows;
     }
-    var squadRowsDetail = (team.playerIds || []).map(function (pid) {
+    var squadRowsDetail = sortIdsByPos(team.playerIds || []).map(function (pid) {
       var pl = PLAYERS_BY_ID[pid];
       if (!pl) return null;
       return React.createElement("div", { key: pid, style: { display: "flex", justifyContent: "space-between", padding: "5px 4px", borderBottom: "1px solid #1c3253", fontSize: 13 } },
@@ -1105,7 +1111,7 @@ function LeagueTable(props) {
 
   var rows = rowsData.map(function (row, idx) {
     return React.createElement("div", {
-      key: row.id, onClick: function (tid) { return function () { setDetailTeam(tid); }; }(row.id),
+      key: row.id, onClick: isAdmin ? function (tid) { return function () { setDetailTeam(tid); }; }(row.id) : undefined,
       style: { display: "flex", justifyContent: "space-between", padding: "8px 10px", borderRadius: 8, marginBottom: 6, background: idx < 5 ? "#2c5f2d33" : "#1c3253" }
     },
       React.createElement("div", null,
@@ -1124,7 +1130,7 @@ function LeagueTable(props) {
         value: gwSel, onChange: function (e) { setGwSel(e.target.value === "overall" ? "overall" : parseInt(e.target.value, 10)); },
         style: { width: "100%", padding: 10, borderRadius: 8, marginBottom: 10, background: "#1c3253", color: "#fff", border: "none", fontSize: 14 }
       }, gwSelectOptions),
-      React.createElement("div", { style: { fontSize: 11, opacity: 0.6, marginBottom: 8 } }, "Tap a team to see " + (gwSel === "overall" ? "their score history" : "their player-by-player score for that week")),
+      isAdmin ? React.createElement("div", { style: { fontSize: 11, opacity: 0.6, marginBottom: 8 } }, "Tap a team to see " + (gwSel === "overall" ? "their score history" : "their player-by-player score for that week")) : null,
       rowsData.length ? rows : React.createElement("div", { style: { opacity: 0.7, fontSize: 13 } }, "No teams entered yet.")
     )
   );
@@ -1188,7 +1194,9 @@ function Fixtures(props) {
       { club: selMatch.match.away }
     ];
     var sideBlocks = sides.map(function (side) {
-      var clubPlayers = ALL_PLAYERS.filter(function (p) { return p.club === side.club; });
+      var clubPlayers = ALL_PLAYERS.filter(function (p) { return p.club === side.club; }).slice().sort(function (a, b) {
+        return POS_ORDER.indexOf(a.pos) - POS_ORDER.indexOf(b.pos);
+      });
       var rows = clubPlayers.map(function (p) {
         var st = statsForGw[p.id];
         if (!st) return null;
@@ -2091,7 +2099,7 @@ function MyTeam(props) {
     );
   }
 
-  var squadRows = (team.playerIds || []).map(function (id) {
+  var squadRows = sortIdsByPos(team.playerIds || []).map(function (id) {
     var pl = PLAYERS_BY_ID[id];
     if (!pl) return null;
     var isOut = outId === id;
