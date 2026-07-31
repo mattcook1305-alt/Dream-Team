@@ -166,6 +166,16 @@ function dtClearLogin() {
   try { window.localStorage.removeItem("dt_team_id"); } catch (e) { }
 }
 
+function dtSaveAdmin() {
+  try { window.localStorage.setItem("dt_admin_ok", "1"); } catch (e) { }
+}
+function dtLoadAdmin() {
+  try { return window.localStorage.getItem("dt_admin_ok") === "1"; } catch (e) { return false; }
+}
+function dtClearAdmin() {
+  try { window.localStorage.removeItem("dt_admin_ok"); } catch (e) { }
+}
+
 function effectiveSquad(team, gwNum) {
   var ids = (team.playerIds || []).slice();
   var pend = team.pendingEmergency;
@@ -1063,11 +1073,26 @@ function LeagueTable(props) {
       });
       body = playerRows;
     }
+    var squadRowsDetail = (team.playerIds || []).map(function (pid) {
+      var pl = PLAYERS_BY_ID[pid];
+      if (!pl) return null;
+      return React.createElement("div", { key: pid, style: { display: "flex", justifyContent: "space-between", padding: "5px 4px", borderBottom: "1px solid #1c3253", fontSize: 13 } },
+        React.createElement("span", null, pl.name + " (" + pl.pos + ")"),
+        React.createElement("span", { style: { opacity: 0.7 } }, pl.club + " \u00b7 " + fmtMoney(pl.price))
+      );
+    });
     return React.createElement(React.Fragment, null,
       React.createElement(Header, { sub: team.teamName }),
       React.createElement(Card, null,
         React.createElement(Btn, { variant: "ghost", onClick: function () { setDetailTeam(null); } }, "\u2190 Back to table"),
-        React.createElement("div", { style: { marginTop: 10, fontSize: 12, opacity: 0.7, marginBottom: 8 } }, gwSel === "overall" ? "Score by gameweek" : ("Gameweek " + gwSel + " player scores")),
+        React.createElement("div", { style: { marginTop: 10, fontSize: 13 } }, team.entrantName + " \u00b7 " + team.formation + " \u00b7 " + fmtMoney(team.cost || 0))
+      ),
+      React.createElement(Card, null,
+        React.createElement("div", { style: { fontWeight: 700, marginBottom: 8 } }, "Squad"),
+        squadRowsDetail
+      ),
+      React.createElement(Card, null,
+        React.createElement("div", { style: { fontSize: 12, opacity: 0.7, marginBottom: 8 } }, gwSel === "overall" ? "Score by gameweek" : ("Gameweek " + gwSel + " player scores")),
         body
       )
     );
@@ -1364,7 +1389,7 @@ function AdminGate(props) {
   var stateArr = React.useState("");
   var pin = stateArr[0];
   var setPin = stateArr[1];
-  var okArr = React.useState(false);
+  var okArr = React.useState(dtLoadAdmin());
   var ok = okArr[0];
   var setOk = okArr[1];
   var errArr = React.useState("");
@@ -1379,6 +1404,7 @@ function AdminGate(props) {
     var entered = (pin || "").trim();
     var expected = (realPin || "0000").toString().trim();
     if (entered.length > 0 && entered === expected) {
+      dtSaveAdmin();
       setOk(true);
       setErr("");
     } else {
@@ -2241,13 +2267,19 @@ function AdminTab(props) {
   ];
   return React.createElement(AdminGate, null,
     React.createElement(Header, { sub: "Admin" }),
-    React.createElement("div", { style: { display: "flex", gap: 6, padding: "0 14px 10px", flexWrap: "wrap" } },
-      subs.map(function (s) {
-        return React.createElement("button", {
-          key: s.key, onClick: function (k) { return function () { setSub(k); }; }(s.key),
-          style: { padding: "6px 10px", borderRadius: 8, border: "none", background: sub === s.key ? "#ffd23f" : "#1c3253", color: sub === s.key ? "#12233f" : "#fff", fontSize: 11, fontWeight: 700 }
-        }, s.label);
-      })
+    React.createElement("div", { style: { display: "flex", gap: 6, padding: "0 14px 10px", flexWrap: "wrap", justifyContent: "space-between" } },
+      React.createElement("div", { style: { display: "flex", gap: 6, flexWrap: "wrap" } },
+        subs.map(function (s) {
+          return React.createElement("button", {
+            key: s.key, onClick: function (k) { return function () { setSub(k); }; }(s.key),
+            style: { padding: "6px 10px", borderRadius: 8, border: "none", background: sub === s.key ? "#ffd23f" : "#1c3253", color: sub === s.key ? "#12233f" : "#fff", fontSize: 11, fontWeight: 700 }
+          }, s.label);
+        })
+      ),
+      React.createElement("button", {
+        onClick: function () { dtClearAdmin(); window.location.reload(); },
+        style: { padding: "6px 10px", borderRadius: 8, border: "1px solid #ff9a9a", background: "transparent", color: "#ff9a9a", fontSize: 11, fontWeight: 700 }
+      }, "Lock")
     ),
     sub === "stats" ? React.createElement(AdminStats, { teams: props.teams, fixtures: props.fixtures }) : null,
     sub === "fixtures" ? React.createElement(AdminFixtures, { fixtures: props.fixtures }) : null,
