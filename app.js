@@ -188,6 +188,14 @@ function effectiveSquad(team, gwNum) {
   return ids;
 }
 
+function csvEscape(val) {
+  var s = (val === null || val === undefined) ? "" : String(val);
+  if (s.indexOf(",") >= 0 || s.indexOf("\"") >= 0 || s.indexOf("\n") >= 0) {
+    s = "\"" + s.replace(/"/g, "\"\"") + "\"";
+  }
+  return s;
+}
+
 function nowMs() { return Date.now(); }
 
 function dateInRange(now, openStr, closeStr) {
@@ -1801,6 +1809,47 @@ function AdminEntrants(props) {
     });
   }
 
+  function exportTeamsCSV() {
+    var header = ["Team Name", "Entrant Name", "Phone", "Email", "Formation", "Cost", "Paid (a/b/c)", "Total Paid", "Emergency Status", "Transfers Logged",
+      "Player 1", "Player 2", "Player 3", "Player 4", "Player 5", "Player 6", "Player 7", "Player 8", "Player 9", "Player 10", "Player 11"];
+    var lines = [header.map(csvEscape).join(",")];
+    for (var i = 0; i < teamIds.length; i++) {
+      var tid = teamIds[i];
+      var t = teamsObj[tid];
+      var pmt = t.payments || {};
+      var totalPaid = (pmt.a ? 40 : 0) + (pmt.b ? 20 : 0) + (pmt.c ? 20 : 0);
+      var emStatus = "not used";
+      if (t.pendingEmergency) {
+        emStatus = t.pendingEmergency.effectiveGw <= currentGw
+          ? "applied (from GW" + t.pendingEmergency.effectiveGw + ")"
+          : "pending, effective GW" + t.pendingEmergency.effectiveGw;
+      } else if (t.emergencyUsed) {
+        emStatus = "used";
+      }
+      var sortedIds = sortIdsByPos(t.playerIds || []);
+      var playerCols = [];
+      for (var s = 0; s < 11; s++) {
+        var pl = sortedIds[s] ? PLAYERS_BY_ID[sortedIds[s]] : null;
+        playerCols.push(pl ? (pl.name + " (" + pl.pos + ", " + pl.club + ")") : "");
+      }
+      var row = [
+        t.teamName || "", t.entrantName || "", t.phone || "", t.email || "", t.formation || "", t.cost || 0,
+        (pmt.a ? "Y" : "N") + "/" + (pmt.b ? "Y" : "N") + "/" + (pmt.c ? "Y" : "N"), totalPaid, emStatus, (t.transferLog || []).length
+      ].concat(playerCols);
+      lines.push(row.map(csvEscape).join(","));
+    }
+    var csv = lines.join("\r\n");
+    var blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "dreamteam-entrants-" + new Date().toISOString().slice(0, 10) + ".csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
   function togglePayment(tid, key, current) {
     window.db.ref("teams/" + tid + "/payments").update((function () { var o = {}; o[key] = !current; return o; })());
   }
@@ -1892,7 +1941,8 @@ function AdminEntrants(props) {
 
   return React.createElement(Card, null,
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 6 } },
-      React.createElement("div", { style: { fontWeight: 700 } }, "Entrants (" + teamIds.length + " teams, " + paidCount + " fully paid)")
+      React.createElement("div", { style: { fontWeight: 700 } }, "Entrants (" + teamIds.length + " teams, " + paidCount + " fully paid)"),
+      React.createElement(Btn, { variant: "ghost", onClick: exportTeamsCSV }, "\u2b07\ufe0f Export")
     ),
     React.createElement("div", { style: { fontSize: 11, opacity: 0.7, marginBottom: 8 } }, "Emergency transfers apply automatically once their effective gameweek arrives \u2014 no action needed here. Scores recalculate automatically whenever fixtures/stats are synced from Admin > Stats entry."),
     syncMsg ? React.createElement("div", { style: { fontSize: 11, color: "#ffd23f", marginBottom: 8 } }, syncMsg) : null,
