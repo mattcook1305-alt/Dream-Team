@@ -1990,6 +1990,20 @@ function MyTeam(props) {
   }
 
   var team = teamsObj[foundId];
+  var siblingIds = Object.keys(teamsObj).filter(function (id) {
+    var t = teamsObj[id];
+    return t && t.pin === team.pin && (t.entrantName || "").trim().toLowerCase() === (team.entrantName || "").trim().toLowerCase();
+  });
+
+  function switchTeam(id) {
+    if (id === foundId) return;
+    dtSaveLogin(id);
+    setFoundId(id);
+    setOutId(null);
+    setMode(null);
+    setEditing(false);
+  }
+
   var now = nowMs();
   var deadlineMs = new Date(CFG.entryDeadline + "T23:59:59").getTime();
   var preSeasonUnlimited = now < deadlineMs;
@@ -2161,6 +2175,19 @@ function MyTeam(props) {
 
   return React.createElement(React.Fragment, null,
     React.createElement(Header, { sub: team.teamName }),
+    siblingIds.length > 1 ? React.createElement("div", { style: { display: "flex", gap: 8, overflowX: "auto", padding: "0 14px 4px" } },
+      siblingIds.map(function (id) {
+        var t = teamsObj[id];
+        var isActive = id === foundId;
+        return React.createElement("button", {
+          key: id, onClick: function (tid) { return function () { switchTeam(tid); }; }(id),
+          style: {
+            padding: "8px 14px", borderRadius: 20, border: "none", fontWeight: 800, fontSize: 12,
+            background: isActive ? "#6fcf6f" : "#1c3253", color: isActive ? "#0e1b33" : "#fff", flexShrink: 0
+          }
+        }, t.teamName);
+      })
+    ) : null,
     React.createElement(Card, null,
       React.createElement("div", { style: { fontSize: 13, marginBottom: 4 } }, team.entrantName + " \u00b7 " + team.formation + " \u00b7 " + fmtMoney(team.cost || 0)),
       statusLines,
