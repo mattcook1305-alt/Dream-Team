@@ -1779,6 +1779,27 @@ function AdminEntrants(props) {
   var setSyncMsg = syncArr[1];
   var gwArr = useDbValue("config/currentGameweek", 1);
   var currentGw = gwArr[0];
+  var editIdArr = React.useState(null);
+  var editId = editIdArr[0];
+  var setEditId = editIdArr[1];
+  var editValArr = React.useState({ teamName: "", entrantName: "" });
+  var editVal = editValArr[0];
+  var setEditVal = editValArr[1];
+
+  function startEdit(tid, t) {
+    setEditId(tid);
+    setEditVal({ teamName: t.teamName || "", entrantName: t.entrantName || "" });
+  }
+
+  function saveEdit(tid) {
+    if (!editVal.teamName.trim() || !editVal.entrantName.trim()) return;
+    window.db.ref("teams/" + tid).update({
+      teamName: editVal.teamName.trim(),
+      entrantName: editVal.entrantName.trim()
+    }).then(function () {
+      setEditId(null);
+    });
+  }
 
   function togglePayment(tid, key, current) {
     window.db.ref("teams/" + tid + "/payments").update((function () { var o = {}; o[key] = !current; return o; })());
@@ -1823,20 +1844,47 @@ function AdminEntrants(props) {
         }
       }, p.label);
     });
-    return React.createElement("div", { key: tid, style: { padding: "8px 4px", borderBottom: "1px solid #1c3253", fontSize: 12 } },
-      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 4 } },
-        React.createElement("div", null,
+    var isEditing = editId === tid;
+    var nameBlock = isEditing
+      ? React.createElement("div", { style: { marginBottom: 6 } },
+          React.createElement("input", {
+            placeholder: "Team name", value: editVal.teamName,
+            onChange: function (e) { setEditVal(Object.assign({}, editVal, { teamName: e.target.value })); },
+            style: { width: "100%", padding: 8, borderRadius: 6, marginBottom: 6, background: "#12233f", color: "#fff", border: "1px solid #3d5a8a", fontSize: 12 }
+          }),
+          React.createElement("input", {
+            placeholder: "Entrant name", value: editVal.entrantName,
+            onChange: function (e) { setEditVal(Object.assign({}, editVal, { entrantName: e.target.value })); },
+            style: { width: "100%", padding: 8, borderRadius: 6, background: "#12233f", color: "#fff", border: "1px solid #3d5a8a", fontSize: 12 }
+          })
+        )
+      : React.createElement("div", null,
           React.createElement("b", null, t.teamName), " \u2014 ", t.entrantName, " \u00b7 ", t.formation, " \u00b7 ", fmtMoney(t.cost || 0)
-        ),
-        React.createElement("div", { style: { display: "flex", alignItems: "center" } },
-          payButtons,
+        );
+    return React.createElement("div", { key: tid, style: { padding: "8px 4px", borderBottom: "1px solid #1c3253", fontSize: 12 } },
+      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 4 } },
+        nameBlock,
+        React.createElement("div", { style: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: 4 } },
+          isEditing ? null : payButtons,
+          isEditing
+            ? React.createElement("button", {
+                onClick: function (id) { return function () { saveEdit(id); }; }(tid),
+                style: { padding: "5px 10px", borderRadius: 8, border: "none", fontWeight: 700, fontSize: 11, background: "#2c5f2d", color: "#fff" }
+              }, "Save details")
+            : React.createElement("button", {
+                onClick: function (id, team) { return function () { startEdit(id, team); }; }(tid, t),
+                style: { padding: "5px 8px", borderRadius: 8, border: "none", fontWeight: 700, fontSize: 11, background: "#1c3253", color: "#ffd23f", marginLeft: 4 }
+              }, "Edit"),
           React.createElement("button", {
             onClick: function (id, name) { return function () { deleteTeam(id, name); }; }(tid, t.teamName),
-            style: { padding: "5px 8px", borderRadius: 8, border: "none", fontWeight: 700, fontSize: 11, background: "#3a1c1c", color: "#ff9a9a", marginLeft: 8 }
+            style: { padding: "5px 8px", borderRadius: 8, border: "none", fontWeight: 700, fontSize: 11, background: "#3a1c1c", color: "#ff9a9a", marginLeft: 4 }
           }, "Delete")
         )
       ),
-      React.createElement("div", { style: { opacity: 0.6, fontSize: 11, marginTop: 4 } },
+      React.createElement("div", { style: { opacity: 0.85, fontSize: 11, marginTop: 4 } },
+        "\ud83d\udcde " + (t.phone || "\u2014") + "  \u2709\ufe0f " + (t.email || "\u2014")
+      ),
+      React.createElement("div", { style: { opacity: 0.6, fontSize: 11, marginTop: 2 } },
         "Paid \u00a3" + totalPaid + " of \u00a380 \u00b7 transfers logged: ", (t.transferLog || []).length, " \u00b7 emergency: ", emStatus
       )
     );
