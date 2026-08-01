@@ -1810,33 +1810,35 @@ function AdminEntrants(props) {
   }
 
   function exportTeamsCSV() {
-    var header = ["Team Name", "Entrant Name", "Phone", "Email", "Formation", "Cost", "Paid (a/b/c)", "Total Paid", "Emergency Status", "Transfers Logged",
-      "Player 1", "Player 2", "Player 3", "Player 4", "Player 5", "Player 6", "Player 7", "Player 8", "Player 9", "Player 10", "Player 11"];
-    var lines = [header.map(csvEscape).join(",")];
+    var lines = [];
     for (var i = 0; i < teamIds.length; i++) {
       var tid = teamIds[i];
       var t = teamsObj[tid];
       var pmt = t.payments || {};
       var totalPaid = (pmt.a ? 40 : 0) + (pmt.b ? 20 : 0) + (pmt.c ? 20 : 0);
-      var emStatus = "not used";
+      var owed = 80 - totalPaid;
+      var emStatus = "Not used";
       if (t.pendingEmergency) {
         emStatus = t.pendingEmergency.effectiveGw <= currentGw
-          ? "applied (from GW" + t.pendingEmergency.effectiveGw + ")"
-          : "pending, effective GW" + t.pendingEmergency.effectiveGw;
+          ? "Applied (from GW" + t.pendingEmergency.effectiveGw + ")"
+          : "Pending, effective GW" + t.pendingEmergency.effectiveGw;
       } else if (t.emergencyUsed) {
-        emStatus = "used";
+        emStatus = "Used";
       }
       var sortedIds = sortIdsByPos(t.playerIds || []);
-      var playerCols = [];
+
+      lines.push(["Entrant Name", t.entrantName || ""].map(csvEscape).join(","));
+      lines.push(["Phone Number", t.phone || ""].map(csvEscape).join(","));
+      lines.push(["Email", t.email || ""].map(csvEscape).join(","));
+      lines.push(["Team Name", t.teamName || ""].map(csvEscape).join(","));
+      lines.push(["Payment Status", "Paid \u00a3" + totalPaid + ", Owed \u00a3" + owed].map(csvEscape).join(","));
+      lines.push(["Emergency Transfer", emStatus].map(csvEscape).join(","));
       for (var s = 0; s < 11; s++) {
         var pl = sortedIds[s] ? PLAYERS_BY_ID[sortedIds[s]] : null;
-        playerCols.push(pl ? (pl.name + " (" + pl.pos + ", " + pl.club + ")") : "");
+        var label = "Player " + (s + 1);
+        lines.push([label, pl ? (pl.name + " (" + pl.pos + ", " + pl.club + ")") : ""].map(csvEscape).join(","));
       }
-      var row = [
-        t.teamName || "", t.entrantName || "", t.phone || "", t.email || "", t.formation || "", t.cost || 0,
-        (pmt.a ? "Y" : "N") + "/" + (pmt.b ? "Y" : "N") + "/" + (pmt.c ? "Y" : "N"), totalPaid, emStatus, (t.transferLog || []).length
-      ].concat(playerCols);
-      lines.push(row.map(csvEscape).join(","));
+      lines.push("");
     }
     var csv = lines.join("\r\n");
     var blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
