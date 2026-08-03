@@ -1099,7 +1099,8 @@ function LeagueTable(props) {
       React.createElement(Header, { sub: team.teamName }),
       React.createElement(Card, null,
         React.createElement(Btn, { variant: "ghost", onClick: function () { setDetailTeam(null); } }, "\u2190 Back to table"),
-        React.createElement("div", { style: { marginTop: 10, fontSize: 13 } }, team.entrantName + " \u00b7 " + team.formation + " \u00b7 " + fmtMoney(team.cost || 0))
+        React.createElement("div", { style: { marginTop: 10, fontSize: 13 } }, team.entrantName + " \u00b7 " + team.formation + " \u00b7 " + fmtMoney(team.cost || 0)),
+        team.sweepstakeClub ? React.createElement("div", { style: { fontSize: 12, color: "#ffd23f", marginTop: 4 } }, "\ud83c\udfc6 Sweepstake team: " + team.sweepstakeClub) : null
       ),
       React.createElement(Card, null,
         React.createElement("div", { style: { fontWeight: 700, marginBottom: 8 } }, "Squad"),
@@ -1794,6 +1795,10 @@ function AdminEntrants(props) {
   var editVal = editValArr[0];
   var setEditVal = editValArr[1];
 
+  function setSweepstake(tid, club) {
+    window.db.ref("teams/" + tid).update({ sweepstakeClub: club || null });
+  }
+
   function startEdit(tid, t) {
     setEditId(tid);
     setEditVal({ teamName: t.teamName || "", entrantName: t.entrantName || "" });
@@ -1833,6 +1838,7 @@ function AdminEntrants(props) {
       lines.push(["Team Name", t.teamName || ""].map(csvEscape).join(","));
       lines.push(["Payment Status", "Paid \u00a3" + totalPaid + ", Owed \u00a3" + owed].map(csvEscape).join(","));
       lines.push(["Emergency Transfer", emStatus].map(csvEscape).join(","));
+      lines.push(["Sweepstake Team", t.sweepstakeClub || ""].map(csvEscape).join(","));
       for (var s = 0; s < 11; s++) {
         var pl = sortedIds[s] ? PLAYERS_BY_ID[sortedIds[s]] : null;
         var label = "Player " + (s + 1);
@@ -1867,6 +1873,10 @@ function AdminEntrants(props) {
     var pmt = teamIds[pc] && teamsObj[teamIds[pc]].payments;
     if (pmt && pmt.a && pmt.b && pmt.c) paidCount++;
   }
+
+  var sweepstakeOptions = [React.createElement("option", { key: "none", value: "" }, "\u2014 not assigned \u2014")].concat(
+    ALL_CLUBS.map(function (c) { return React.createElement("option", { key: c, value: c }, c); })
+  );
 
   var rows = teamIds.map(function (tid) {
     var t = teamsObj[tid];
@@ -1937,6 +1947,13 @@ function AdminEntrants(props) {
       ),
       React.createElement("div", { style: { opacity: 0.6, fontSize: 11, marginTop: 2 } },
         "Paid \u00a3" + totalPaid + " of \u00a380 \u00b7 transfers logged: ", (t.transferLog || []).length, " \u00b7 emergency: ", emStatus
+      ),
+      React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6, marginTop: 6 } },
+        React.createElement("span", { style: { fontSize: 11, opacity: 0.8 } }, "\ud83c\udfc6 Sweepstake team:"),
+        React.createElement("select", {
+          value: t.sweepstakeClub || "", onChange: function (id) { return function (e) { setSweepstake(id, e.target.value); }; }(tid),
+          style: { flex: 1, padding: 6, borderRadius: 6, background: "#12233f", color: "#fff", border: "1px solid #3d5a8a", fontSize: 11 }
+        }, sweepstakeOptions)
       )
     );
   });
@@ -2290,6 +2307,7 @@ function MyTeam(props) {
     ) : null,
     React.createElement(Card, null,
       React.createElement("div", { style: { fontSize: 13, marginBottom: 4 } }, team.entrantName + " \u00b7 " + team.formation + " \u00b7 " + fmtMoney(team.cost || 0)),
+      team.sweepstakeClub ? React.createElement("div", { style: { fontSize: 12, color: "#ffd23f", marginBottom: 4 } }, "\ud83c\udfc6 Sweepstake team: " + team.sweepstakeClub) : null,
       statusLines,
       React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
         preSeasonUnlimited ? React.createElement(Btn, { onClick: function () { setEditing(true); } }, "Edit team") : null,
