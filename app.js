@@ -8,6 +8,7 @@ var PLAYERS_BY_ID = {};
 for (var pbi = 0; pbi < ALL_PLAYERS.length; pbi++) {
   PLAYERS_BY_ID[ALL_PLAYERS[pbi].id] = ALL_PLAYERS[pbi];
 }
+var STATIC_PLAYER_COUNT = ALL_PLAYERS.length;
 
 function fmtMoney(n) {
   var v = Math.round(n * 10) / 10;
@@ -1462,6 +1463,20 @@ function AdminPlayers(props) {
   var addMsg = addMsgArr[0];
   var setAddMsg = addMsgArr[1];
 
+  function deletePlayer(id, name) {
+    var teamsObj = props.teams || {};
+    var affected = Object.keys(teamsObj).filter(function (tid) {
+      return (teamsObj[tid].playerIds || []).indexOf(id) >= 0;
+    });
+    if (affected.length) {
+      window.alert("Can't delete \"" + name + "\" \u2014 they're in " + affected.length + " submitted squad" + (affected.length === 1 ? "" : "s") + ". Those entrants need to transfer them out first (or you can do it for them) before this player can be removed.");
+      return;
+    }
+    var ok = window.confirm("Delete \"" + name + "\" permanently? This can't be undone.");
+    if (!ok) return;
+    window.db.ref("players/" + id).remove();
+  }
+
   function addPlayer() {
     if (!newP.name.trim()) { setAddMsg("Enter a player name."); return; }
     var price = parseFloat(newP.price);
@@ -1504,7 +1519,11 @@ function AdminPlayers(props) {
           )
         : React.createElement("div", null,
             fmtMoney(dbP.price) + "  ",
-            React.createElement("button", { onClick: function () { setEditId(p.id); setPriceVal(String(dbP.price)); } }, "Edit")
+            React.createElement("button", { onClick: function () { setEditId(p.id); setPriceVal(String(dbP.price)); } }, "Edit"),
+            React.createElement("button", {
+              onClick: function (id, name) { return function () { deletePlayer(id, name); }; }(p.id, dbP.name),
+              style: { marginLeft: 6, color: "#ff9a9a" }
+            }, "Delete")
           )
     );
   });
@@ -2516,7 +2535,7 @@ function AdminTab(props) {
     ),
     sub === "stats" ? React.createElement(AdminStats, { teams: props.teams, fixtures: props.fixtures }) : null,
     sub === "fixtures" ? React.createElement(AdminFixtures, { fixtures: props.fixtures }) : null,
-    sub === "players" ? React.createElement(AdminPlayers, { playersDb: props.playersDb }) : null,
+    sub === "players" ? React.createElement(AdminPlayers, { playersDb: props.playersDb, teams: props.teams }) : null,
     sub === "entrants" ? React.createElement(AdminEntrants, { teams: props.teams }) : null,
     sub === "settings" ? React.createElement(AdminSettings, null) : null
   );
@@ -2560,6 +2579,8 @@ function App() {
   var playersVersionArr = React.useState(0);
   var setPlayersVersion = playersVersionArr[1];
 
+  var seededRef = React.useRef(false);
+
   React.useEffect(function () {
     var ids = Object.keys(playersDb || {});
     var changed = false;
@@ -2582,6 +2603,21 @@ function App() {
         PLAYERS_BY_ID[id] = newP;
         if (ALL_CLUBS.indexOf(dbP.club) < 0) ALL_CLUBS.push(dbP.club);
         changed = true;
+      }
+    }
+    if (!seededRef.current && ids.length >= STATIC_PLAYER_COUNT) {
+      seededRef.current = true;
+    }
+    if (seededRef.current) {
+      var dbIdSet = {};
+      for (var j = 0; j < ids.length; j++) dbIdSet[ids[j]] = true;
+      for (var k = ALL_PLAYERS.length - 1; k >= 0; k--) {
+        var pid = ALL_PLAYERS[k].id;
+        if (!dbIdSet[pid]) {
+          ALL_PLAYERS.splice(k, 1);
+          delete PLAYERS_BY_ID[pid];
+          changed = true;
+        }
       }
     }
     if (changed) setPlayersVersion(function (v) { return v + 1; });
