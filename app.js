@@ -1452,11 +1452,46 @@ function AdminPlayers(props) {
   var priceArr = React.useState("");
   var priceVal = priceArr[0];
   var setPriceVal = priceArr[1];
+  var filterArr = React.useState({ pos: "ALL", club: "ALL", search: "" });
+  var filter = filterArr[0];
+  var setFilter = filterArr[1];
+  var newArr = React.useState({ name: "", club: ALL_CLUBS[0], pos: "MID", price: "" });
+  var newP = newArr[0];
+  var setNewP = newArr[1];
+  var addMsgArr = React.useState("");
+  var addMsg = addMsgArr[0];
+  var setAddMsg = addMsgArr[1];
 
-  var rows = ALL_PLAYERS.slice(0, 60).map(function (p) {
+  function addPlayer() {
+    if (!newP.name.trim()) { setAddMsg("Enter a player name."); return; }
+    var price = parseFloat(newP.price);
+    if (isNaN(price) || price <= 0) { setAddMsg("Enter a valid price."); return; }
+    var ref = window.db.ref("players").push();
+    ref.set({
+      name: newP.name.trim(),
+      club: newP.club,
+      pos: newP.pos,
+      price: price
+    }).then(function () {
+      setAddMsg("Added " + newP.name.trim() + ".");
+      setNewP({ name: "", club: newP.club, pos: newP.pos, price: "" });
+    });
+  }
+
+  var filtered = ALL_PLAYERS.filter(function (p) {
+    if (filter.pos !== "ALL" && p.pos !== filter.pos) return false;
+    if (filter.club !== "ALL" && p.club !== filter.club) return false;
+    if (filter.search && p.name.toLowerCase().indexOf(filter.search.toLowerCase()) === -1) return false;
+    return true;
+  });
+
+  var clubOptions = ALL_CLUBS.map(function (c) { return React.createElement("option", { key: c, value: c }, c); });
+  var clubFilterOptions = [React.createElement("option", { key: "ALL", value: "ALL" }, "All clubs")].concat(clubOptions);
+
+  var rows = filtered.map(function (p) {
     var dbP = (playersObj && playersObj[p.id]) || p;
     return React.createElement("div", { key: p.id, style: { display: "flex", justifyContent: "space-between", padding: "6px 8px", fontSize: 13, borderBottom: "1px solid #1c3253" } },
-      React.createElement("div", null, dbP.name + " (" + dbP.club + ")"),
+      React.createElement("div", null, dbP.name + " (" + dbP.pos + ", " + dbP.club + ")"),
       editId === p.id
         ? React.createElement("div", null,
             React.createElement("input", { value: priceVal, onChange: function (e) { setPriceVal(e.target.value); }, style: { width: 50, marginRight: 6 } }),
@@ -1474,9 +1509,54 @@ function AdminPlayers(props) {
     );
   });
 
-  return React.createElement(Card, null,
-    React.createElement("div", { style: { fontWeight: 700, marginBottom: 8 } }, "Players & prices (showing first 60 \u2014 use search to find more via team builder list)"),
-    React.createElement("div", { style: { maxHeight: 400, overflowY: "auto" } }, rows)
+  return React.createElement(React.Fragment, null,
+    React.createElement(Card, null,
+      React.createElement("div", { style: { fontWeight: 700, marginBottom: 8 } }, "Add a new player"),
+      React.createElement("input", {
+        placeholder: "Player name", value: newP.name,
+        onChange: function (e) { setNewP(Object.assign({}, newP, { name: e.target.value })); },
+        style: { width: "100%", padding: 8, borderRadius: 6, marginBottom: 6, background: "#1c3253", color: "#fff", border: "none" }
+      }),
+      React.createElement("div", { style: { display: "flex", gap: 6, marginBottom: 6 } },
+        React.createElement("select", {
+          value: newP.club, onChange: function (e) { setNewP(Object.assign({}, newP, { club: e.target.value })); },
+          style: { flex: 1, padding: 8, borderRadius: 6, background: "#1c3253", color: "#fff", border: "none" }
+        }, clubOptions),
+        React.createElement("select", {
+          value: newP.pos, onChange: function (e) { setNewP(Object.assign({}, newP, { pos: e.target.value })); },
+          style: { width: 80, padding: 8, borderRadius: 6, background: "#1c3253", color: "#fff", border: "none" }
+        }, ["GK", "DEF", "MID", "FWD"].map(function (p) { return React.createElement("option", { key: p, value: p }, p); }))
+      ),
+      React.createElement("input", {
+        placeholder: "Price (e.g. 5.5)", value: newP.price, inputMode: "decimal",
+        onChange: function (e) { setNewP(Object.assign({}, newP, { price: e.target.value })); },
+        style: { width: "100%", padding: 8, borderRadius: 6, marginBottom: 8, background: "#1c3253", color: "#fff", border: "none" }
+      }),
+      addMsg ? React.createElement("div", { style: { fontSize: 11, color: "#ffd23f", marginBottom: 8 } }, addMsg) : null,
+      React.createElement(Btn, { onClick: addPlayer }, "Add player"),
+      React.createElement("div", { style: { fontSize: 11, opacity: 0.6, marginTop: 8 } }, "New players appear immediately in the team builder and everywhere else in the app for everyone to pick.")
+    ),
+    React.createElement(Card, null,
+      React.createElement("div", { style: { fontWeight: 700, marginBottom: 8 } }, "Players & prices (" + filtered.length + " of " + ALL_PLAYERS.length + ")"),
+      React.createElement("div", { style: { display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" } },
+        ["ALL", "GK", "DEF", "MID", "FWD"].map(function (p) {
+          return React.createElement("button", {
+            key: p, onClick: function (val) { return function () { setFilter(Object.assign({}, filter, { pos: val })); }; }(p),
+            style: { padding: "6px 10px", borderRadius: 8, border: "none", background: filter.pos === p ? "#ffd23f" : "#1c3253", color: filter.pos === p ? "#12233f" : "#fff", fontSize: 11, fontWeight: 700 }
+          }, p);
+        })
+      ),
+      React.createElement("select", {
+        value: filter.club, onChange: function (e) { setFilter(Object.assign({}, filter, { club: e.target.value })); },
+        style: { width: "100%", padding: 8, borderRadius: 8, marginBottom: 8, background: "#1c3253", color: "#fff", border: "none" }
+      }, clubFilterOptions),
+      React.createElement("input", {
+        placeholder: "Search player", value: filter.search,
+        onChange: function (e) { setFilter(Object.assign({}, filter, { search: e.target.value })); },
+        style: { width: "100%", padding: 8, borderRadius: 8, marginBottom: 10, background: "#1c3253", color: "#fff", border: "none" }
+      }),
+      React.createElement("div", { style: { maxHeight: 400, overflowY: "auto" } }, rows)
+    )
   );
 }
 
@@ -2476,6 +2556,36 @@ function App() {
       }
     });
   }, []);
+
+  var playersVersionArr = React.useState(0);
+  var setPlayersVersion = playersVersionArr[1];
+
+  React.useEffect(function () {
+    var ids = Object.keys(playersDb || {});
+    var changed = false;
+    for (var i = 0; i < ids.length; i++) {
+      var id = ids[i];
+      var dbP = playersDb[id];
+      if (!dbP || !dbP.name) continue;
+      var existing = PLAYERS_BY_ID[id];
+      if (existing) {
+        if (existing.price !== dbP.price || existing.club !== dbP.club || existing.pos !== dbP.pos || existing.name !== dbP.name) {
+          existing.price = dbP.price;
+          existing.club = dbP.club;
+          existing.pos = dbP.pos;
+          existing.name = dbP.name;
+          changed = true;
+        }
+      } else {
+        var newP = { id: id, name: dbP.name, club: dbP.club, pos: dbP.pos, price: dbP.price };
+        ALL_PLAYERS.push(newP);
+        PLAYERS_BY_ID[id] = newP;
+        if (ALL_CLUBS.indexOf(dbP.club) < 0) ALL_CLUBS.push(dbP.club);
+        changed = true;
+      }
+    }
+    if (changed) setPlayersVersion(function (v) { return v + 1; });
+  }, [playersDb]);
 
   var tabs = [
     { key: "home", label: "Home" },
