@@ -1450,9 +1450,6 @@ function AdminPlayers(props) {
   var stateArr = React.useState(null);
   var editId = stateArr[0];
   var setEditId = stateArr[1];
-  var priceArr = React.useState("");
-  var priceVal = priceArr[0];
-  var setPriceVal = priceArr[1];
   var filterArr = React.useState({ pos: "ALL", club: "ALL", search: "" });
   var filter = filterArr[0];
   var setFilter = filterArr[1];
@@ -1503,27 +1500,51 @@ function AdminPlayers(props) {
   var clubOptions = ALL_CLUBS.map(function (c) { return React.createElement("option", { key: c, value: c }, c); });
   var clubFilterOptions = [React.createElement("option", { key: "ALL", value: "ALL" }, "All clubs")].concat(clubOptions);
 
+  var editArr = React.useState({ price: "", club: "", pos: "" });
+  var editVals = editArr[0];
+  var setEditVals = editArr[1];
+
   var rows = filtered.map(function (p) {
     var dbP = (playersObj && playersObj[p.id]) || p;
-    return React.createElement("div", { key: p.id, style: { display: "flex", justifyContent: "space-between", padding: "6px 8px", fontSize: 13, borderBottom: "1px solid #1c3253" } },
-      React.createElement("div", null, dbP.name + " (" + dbP.pos + ", " + dbP.club + ")"),
+    return React.createElement("div", { key: p.id, style: { padding: "6px 8px", borderBottom: "1px solid #1c3253", fontSize: 13 } },
       editId === p.id
         ? React.createElement("div", null,
-            React.createElement("input", { value: priceVal, onChange: function (e) { setPriceVal(e.target.value); }, style: { width: 50, marginRight: 6 } }),
-            React.createElement("button", {
-              onClick: function () {
-                window.db.ref("players/" + p.id).update({ price: parseFloat(priceVal) });
-                setEditId(null);
-              }
-            }, "Save")
+            React.createElement("div", { style: { fontWeight: 700, marginBottom: 6 } }, dbP.name),
+            React.createElement("div", { style: { display: "flex", gap: 6, marginBottom: 6 } },
+              React.createElement("select", {
+                value: editVals.club, onChange: function (e) { setEditVals(Object.assign({}, editVals, { club: e.target.value })); },
+                style: { flex: 1, padding: 6, borderRadius: 6, background: "#1c3253", color: "#fff", border: "none" }
+              }, clubOptions),
+              React.createElement("select", {
+                value: editVals.pos, onChange: function (e) { setEditVals(Object.assign({}, editVals, { pos: e.target.value })); },
+                style: { width: 70, padding: 6, borderRadius: 6, background: "#1c3253", color: "#fff", border: "none" }
+              }, ["GK", "DEF", "MID", "FWD"].map(function (pp) { return React.createElement("option", { key: pp, value: pp }, pp); }))
+            ),
+            React.createElement("div", { style: { display: "flex", gap: 6, alignItems: "center" } },
+              React.createElement("input", {
+                value: editVals.price, onChange: function (e) { setEditVals(Object.assign({}, editVals, { price: e.target.value })); },
+                style: { width: 60, padding: 6, borderRadius: 6, background: "#1c3253", color: "#fff", border: "none" }
+              }),
+              React.createElement("button", {
+                onClick: function (id) { return function () {
+                  window.db.ref("players/" + id).update({ price: parseFloat(editVals.price), club: editVals.club, pos: editVals.pos });
+                  setEditId(null);
+                }; }(p.id)
+              }, "Save"),
+              React.createElement("button", { onClick: function () { setEditId(null); } }, "Cancel")
+            ),
+            React.createElement("div", { style: { fontSize: 10, opacity: 0.6, marginTop: 4 } }, "Changing club here is how you handle a real mid-season transfer \u2014 it updates this player everywhere they're already picked, unlike adding a new player entry.")
           )
-        : React.createElement("div", null,
-            fmtMoney(dbP.price) + "  ",
-            React.createElement("button", { onClick: function () { setEditId(p.id); setPriceVal(String(dbP.price)); } }, "Edit"),
-            React.createElement("button", {
-              onClick: function (id, name) { return function () { deletePlayer(id, name); }; }(p.id, dbP.name),
-              style: { marginLeft: 6, color: "#ff9a9a" }
-            }, "Delete")
+        : React.createElement("div", { style: { display: "flex", justifyContent: "space-between" } },
+            React.createElement("div", null, dbP.name + " (" + dbP.pos + ", " + dbP.club + ")"),
+            React.createElement("div", null,
+              fmtMoney(dbP.price) + "  ",
+              React.createElement("button", { onClick: function (id, d) { return function () { setEditId(id); setEditVals({ price: String(d.price), club: d.club, pos: d.pos }); }; }(p.id, dbP) }, "Edit"),
+              React.createElement("button", {
+                onClick: function (id, name) { return function () { deletePlayer(id, name); }; }(p.id, dbP.name),
+                style: { marginLeft: 6, color: "#ff9a9a" }
+              }, "Delete")
+            )
           )
     );
   });
