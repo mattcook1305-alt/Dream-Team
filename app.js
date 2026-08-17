@@ -1026,7 +1026,7 @@ function LeagueTable(props) {
   var resultsObj = props.results || {};
   var gwstatsObj = props.gwstats || {};
   var teamIds = Object.keys(teamsObj || {});
-  var isAdmin = dtLoadAdmin();
+  var canViewDetail = dtLoadAdmin() || nowMs() > new Date(CFG.entryDeadline + "T23:59:59").getTime();
 
   var gwOptionsArr = Object.keys(resultsObj).map(function (k) {
     return parseInt(k.replace("gw", ""), 10);
@@ -1061,7 +1061,7 @@ function LeagueTable(props) {
   }
   rowsData.sort(function (a, b) { return b.score - a.score; });
 
-  if (detailTeam && isAdmin) {
+  if (detailTeam && canViewDetail) {
     var team = teamsObj[detailTeam];
     var body;
     if (gwSel === "overall") {
@@ -1121,7 +1121,7 @@ function LeagueTable(props) {
 
   var rows = rowsData.map(function (row, idx) {
     return React.createElement("div", {
-      key: row.id, onClick: isAdmin ? function (tid) { return function () { setDetailTeam(tid); }; }(row.id) : undefined,
+      key: row.id, onClick: canViewDetail ? function (tid) { return function () { setDetailTeam(tid); }; }(row.id) : undefined,
       style: { display: "flex", justifyContent: "space-between", padding: "8px 10px", borderRadius: 8, marginBottom: 6, background: idx < 5 ? "#2c5f2d33" : "#1c3253" }
     },
       React.createElement("div", null,
@@ -1140,7 +1140,7 @@ function LeagueTable(props) {
         value: gwSel, onChange: function (e) { setGwSel(e.target.value === "overall" ? "overall" : parseInt(e.target.value, 10)); },
         style: { width: "100%", padding: 10, borderRadius: 8, marginBottom: 10, background: "#1c3253", color: "#fff", border: "none", fontSize: 14 }
       }, gwSelectOptions),
-      isAdmin ? React.createElement("div", { style: { fontSize: 11, opacity: 0.6, marginBottom: 8 } }, "Tap a team to see " + (gwSel === "overall" ? "their score history" : "their player-by-player score for that week")) : null,
+      canViewDetail ? React.createElement("div", { style: { fontSize: 11, opacity: 0.6, marginBottom: 8 } }, "Tap a team to see " + (gwSel === "overall" ? "their score history" : "their player-by-player score for that week")) : null,
       rowsData.length ? rows : React.createElement("div", { style: { opacity: 0.7, fontSize: 13 } }, "No teams entered yet.")
     )
   );
