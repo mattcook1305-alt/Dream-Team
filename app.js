@@ -2257,6 +2257,9 @@ function MyTeam(props) {
   var windowTransfersLeft = CFG.transfersPerWindow - usedThisWindow;
   var emergencyAvailable = !team.emergencyUsed && !windowOpen && inAnyPeriod(emergencyPeriods, now);
   var pending = team.pendingEmergency || null;
+  var teamPmt = team.payments || {};
+  var teamPaid = (teamPmt.a ? 40 : 0) + (teamPmt.b ? 20 : 0) + (teamPmt.c ? 20 : 0);
+  var teamOwed = 80 - teamPaid;
 
   if (editing) {
     return React.createElement(TeamBuilder, {
@@ -2427,6 +2430,10 @@ function MyTeam(props) {
     ) : null,
     React.createElement(Card, null,
       React.createElement("div", { style: { fontSize: 13, marginBottom: 4 } }, team.entrantName + " \u00b7 " + team.formation + " \u00b7 " + fmtMoney(team.cost || 0)),
+      React.createElement("div", { style: { fontSize: 12, marginBottom: 4 } },
+        "\ud83d\udcb0 Paid \u00a3" + teamPaid + " of \u00a380",
+        teamOwed > 0 ? React.createElement("span", { style: { color: "#ff9a9a" } }, " \u2014 " + "\u00a3" + teamOwed + " still owed") : React.createElement("span", { style: { color: "#6fcf6f" } }, " \u2014 fully paid")
+      ),
       team.sweepstakeClub ? React.createElement("div", { style: { fontSize: 12, color: "#ffd23f", marginBottom: 4 } }, "\ud83c\udfc6 Sweepstake team: " + team.sweepstakeClub) : null,
       statusLines,
       React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
