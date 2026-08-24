@@ -485,14 +485,35 @@ function fetchApiFixtures(competition, season) {
   });
 }
 
+var CLUB_ALIASES = {
+  "nott m forest": "nottingham forest",
+  "notts forest": "nottingham forest",
+  "man utd": "manchester united",
+  "man united": "manchester united",
+  "man city": "manchester city",
+  "spurs": "tottenham hotspur",
+  "tottenham": "tottenham hotspur",
+  "wolves": "wolverhampton wanderers",
+  "leicester": "leicester city",
+  "sheffield utd": "sheffield united",
+  "west brom": "west bromwich albion",
+  "newcastle utd": "newcastle united",
+  "brighton": "brighton hove albion",
+  "brighton and hove albion": "brighton hove albion"
+};
+
+function canonClub(normed) {
+  return CLUB_ALIASES[normed] || normed;
+}
+
 function findLocalPlayerMatch(apiName, clubName) {
   var target = normName(apiName);
-  var targetClub = normName(clubName);
+  var targetClub = canonClub(normName(clubName));
   var best = null;
   for (var i = 0; i < ALL_PLAYERS.length; i++) {
     var p = ALL_PLAYERS[i];
     var pn = normName(p.name);
-    var pc = normName(p.club);
+    var pc = canonClub(normName(p.club));
     var clubOk = targetClub && (pc.indexOf(targetClub) >= 0 || targetClub.indexOf(pc) >= 0);
     if (pn === target && clubOk) return p;
     if (pn === target && !best) best = p;
