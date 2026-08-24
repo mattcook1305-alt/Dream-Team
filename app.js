@@ -1267,19 +1267,32 @@ function LeagueTable(props) {
       });
       body = playerRows;
     }
-    var squadDisplayGw = gwSel === "overall" ? (gwOptionsArr.length ? gwOptionsArr[gwOptionsArr.length - 1] : null) : gwSel;
-    var squadDisplayStats = squadDisplayGw ? (gwstatsObj["gw" + squadDisplayGw] || {}) : {};
+    var allSyncedGwIds = Object.keys(gwstatsObj);
     var squadRowsDetail = sortIdsByPos(team.playerIds || []).map(function (pid) {
       var pl = PLAYERS_BY_ID[pid];
       if (!pl) return null;
-      var pts = squadDisplayGw ? computeScore(squadDisplayStats[pid], pl.pos) : null;
+      var pts, clickStat, clickLabel, clickable;
+      if (gwSel === "overall") {
+        pts = 0;
+        for (var sgi = 0; sgi < allSyncedGwIds.length; sgi++) {
+          pts += computeScore(gwstatsObj[allSyncedGwIds[sgi]][pid], pl.pos);
+        }
+        clickable = false;
+      } else {
+        var gwStatsForSel = gwstatsObj["gw" + gwSel] || {};
+        pts = computeScore(gwStatsForSel[pid], pl.pos);
+        clickStat = gwStatsForSel[pid];
+        clickLabel = "GW" + gwSel;
+        clickable = true;
+      }
       return React.createElement("div", {
-        key: pid, onClick: function (pidx, stat, lbl) { return function () { openPlayerBreakdown(pidx, stat, lbl); }; }(pid, squadDisplayStats[pid], squadDisplayGw ? ("GW" + squadDisplayGw) : ""),
+        key: pid,
+        onClick: clickable ? function (pidx, stat, lbl) { return function () { openPlayerBreakdown(pidx, stat, lbl); }; }(pid, clickStat, clickLabel) : undefined,
         style: { display: "flex", justifyContent: "space-between", padding: "6px 4px", borderBottom: "1px solid #1c3253", fontSize: 13 }
       },
         React.createElement("span", null, pl.name + " (" + pl.pos + ")"),
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
-          pts !== null ? React.createElement("b", { style: { color: "#6fcf6f" } }, pts + " pts") : null,
+          React.createElement("b", { style: { color: "#6fcf6f" } }, pts + " pts"),
           React.createElement("span", { style: { opacity: 0.7 } }, pl.club + " \u00b7 " + fmtMoney(pl.price))
         )
       );
@@ -1292,7 +1305,8 @@ function LeagueTable(props) {
         team.sweepstakeClub ? React.createElement("div", { style: { fontSize: 12, color: "#ffd23f", marginTop: 4 } }, "\ud83c\udfc6 Sweepstake team: " + team.sweepstakeClub) : null
       ),
       React.createElement(Card, null,
-        React.createElement("div", { style: { fontWeight: 700, marginBottom: 8 } }, "Squad" + (squadDisplayGw ? " \u2014 GW" + squadDisplayGw + " points" : "")),
+        React.createElement("div", { style: { fontWeight: 700, marginBottom: 8 } }, "Squad" + (gwSel === "overall" ? " \u2014 season total points" : " \u2014 GW" + gwSel + " points")),
+        gwSel === "overall" ? React.createElement("div", { style: { fontSize: 11, opacity: 0.6, marginBottom: 8 } }, "Pick a specific gameweek above to see a player's points breakdown.") : null,
         squadRowsDetail
       ),
       React.createElement(Card, null,
