@@ -307,7 +307,8 @@ function fetchSofaScoreStatsForFixture(dateStr, home, away) {
     .then(function (r) { return r.json(); })
     .then(function (dayData) {
       if (dayData && dayData.error) {
-        throw new Error("Proxy error for " + day + ": " + dayData.error);
+        var errDetail = typeof dayData.error === "string" ? dayData.error : JSON.stringify(dayData.error);
+        throw new Error("Proxy error for " + day + ": " + errDetail);
       }
       var evList = (dayData && dayData.events) || [];
       var ev = findSofaEventForMatch(dayData, home, away);
