@@ -1267,12 +1267,21 @@ function LeagueTable(props) {
       });
       body = playerRows;
     }
+    var squadDisplayGw = gwSel === "overall" ? (gwOptionsArr.length ? gwOptionsArr[gwOptionsArr.length - 1] : null) : gwSel;
+    var squadDisplayStats = squadDisplayGw ? (gwstatsObj["gw" + squadDisplayGw] || {}) : {};
     var squadRowsDetail = sortIdsByPos(team.playerIds || []).map(function (pid) {
       var pl = PLAYERS_BY_ID[pid];
       if (!pl) return null;
-      return React.createElement("div", { key: pid, style: { display: "flex", justifyContent: "space-between", padding: "5px 4px", borderBottom: "1px solid #1c3253", fontSize: 13 } },
+      var pts = squadDisplayGw ? computeScore(squadDisplayStats[pid], pl.pos) : null;
+      return React.createElement("div", {
+        key: pid, onClick: function (pidx, stat, lbl) { return function () { openPlayerBreakdown(pidx, stat, lbl); }; }(pid, squadDisplayStats[pid], squadDisplayGw ? ("GW" + squadDisplayGw) : ""),
+        style: { display: "flex", justifyContent: "space-between", padding: "6px 4px", borderBottom: "1px solid #1c3253", fontSize: 13 }
+      },
         React.createElement("span", null, pl.name + " (" + pl.pos + ")"),
-        React.createElement("span", { style: { opacity: 0.7 } }, pl.club + " \u00b7 " + fmtMoney(pl.price))
+        React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
+          pts !== null ? React.createElement("b", { style: { color: "#6fcf6f" } }, pts + " pts") : null,
+          React.createElement("span", { style: { opacity: 0.7 } }, pl.club + " \u00b7 " + fmtMoney(pl.price))
+        )
       );
     });
     return React.createElement(React.Fragment, null,
@@ -1283,7 +1292,7 @@ function LeagueTable(props) {
         team.sweepstakeClub ? React.createElement("div", { style: { fontSize: 12, color: "#ffd23f", marginTop: 4 } }, "\ud83c\udfc6 Sweepstake team: " + team.sweepstakeClub) : null
       ),
       React.createElement(Card, null,
-        React.createElement("div", { style: { fontWeight: 700, marginBottom: 8 } }, "Squad"),
+        React.createElement("div", { style: { fontWeight: 700, marginBottom: 8 } }, "Squad" + (squadDisplayGw ? " \u2014 GW" + squadDisplayGw + " points" : "")),
         squadRowsDetail
       ),
       React.createElement(Card, null,
