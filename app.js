@@ -60,6 +60,59 @@ function computeScore(stat, pos) {
   return pts;
 }
 
+function scoreBreakdown(stat, pos) {
+  var lines = [];
+  var total = 0;
+  function add(label, val) {
+    if (val !== 0) { lines.push({ label: label, pts: val }); total += val; }
+  }
+  if (!stat) return { lines: [{ label: "No stats recorded for this gameweek", pts: 0 }], total: 0 };
+  var mins = stat.mins || 0;
+  if (mins <= 0) return { lines: [{ label: "Did not play", pts: 0 }], total: 0 };
+
+  if (mins >= 60) add("Appearance (60+ mins)", 2);
+  else add("Appearance (under 60 mins)", 1);
+
+  if (stat.assists) add("Assists (\u00d7" + stat.assists + ")", stat.assists * 3);
+  if (stat.ownGoals) add("Own goals (\u00d7" + stat.ownGoals + ")", -stat.ownGoals * 2);
+  if (stat.yellow) add("Yellow cards (\u00d7" + stat.yellow + ")", -stat.yellow * 1);
+  if (stat.red) add("Red card", -3);
+  if (stat.penMissTaker) add("Penalty missed/saved (\u00d7" + stat.penMissTaker + ")", -stat.penMissTaker * 2);
+
+  var cbit = stat.cbit || 0;
+  if (pos === "GK" || pos === "DEF") {
+    if (cbit >= 10) add("Defensive contribution (" + cbit + " CBIT)", 2);
+  } else if (pos === "MID" || pos === "FWD") {
+    if (cbit >= 12) add("Defensive contribution (" + cbit + " CBIRT)", 2);
+  }
+
+  var goals = stat.goals || 0;
+  if (goals) {
+    var perGoal = pos === "GK" ? 10 : pos === "DEF" ? 6 : pos === "MID" ? 5 : 4;
+    add("Goals (\u00d7" + goals + ")", goals * perGoal);
+  }
+
+  var gc = stat.goalsConceded || 0;
+  var cleanSheet = gc === 0;
+  if (pos === "GK" || pos === "DEF") {
+    if (cleanSheet) add("Clean sheet", 4);
+    var conc = Math.max(0, gc - 1);
+    if (conc) add("Goals conceded (" + gc + ")", -conc);
+  } else if (pos === "MID") {
+    if (cleanSheet) add("Clean sheet", 1);
+  }
+
+  if (pos === "GK") {
+    if (stat.penSaveGK) add("Penalty save (\u00d7" + stat.penSaveGK + ")", stat.penSaveGK * 5);
+    var saveBonus = Math.floor((stat.saves || 0) / 3);
+    if (saveBonus) add("Shot saves (" + (stat.saves || 0) + ")", saveBonus);
+  }
+
+  if (stat.bonus) add("Bonus points", stat.bonus);
+
+  return { lines: lines, total: total };
+}
+
 function formationCounts(playerIds) {
   var counts = { GK: 0, DEF: 0, MID: 0, FWD: 0 };
   for (var i = 0; i < playerIds.length; i++) {
@@ -1204,7 +1257,10 @@ function LeagueTable(props) {
         var pl = PLAYERS_BY_ID[pid];
         if (!pl) return null;
         var sc = computeScore(statsForGw[pid], pl.pos);
-        return React.createElement("div", { key: pid, style: { display: "flex", justifyContent: "space-between", padding: "6px 4px", borderBottom: "1px solid #1c3253", fontSize: 13 } },
+        return React.createElement("div", {
+          key: pid, onClick: function (pidx, st) { return function () { openPlayerBreakdown(pidx, st, "GW" + gwSel); }; }(pid, statsForGw[pid]),
+          style: { display: "flex", justifyContent: "space-between", padding: "6px 4px", borderBottom: "1px solid #1c3253", fontSize: 13 }
+        },
           React.createElement("span", null, pl.name + " (" + pl.pos + ")"),
           React.createElement("b", { style: { color: "#ffd23f" } }, sc)
         );
@@ -1334,7 +1390,10 @@ function Fixtures(props) {
         var st = statsForGw[p.id];
         if (!st) return null;
         var sc = computeScore(st, p.pos);
-        return React.createElement("div", { key: p.id, style: { display: "flex", justifyContent: "space-between", padding: "5px 4px", borderBottom: "1px solid #1c3253", fontSize: 13 } },
+        return React.createElement("div", {
+          key: p.id, onClick: function (pid, stat) { return function () { openPlayerBreakdown(pid, stat, selMatch.gwId.toUpperCase()); }; }(p.id, st),
+          style: { display: "flex", justifyContent: "space-between", padding: "5px 4px", borderBottom: "1px solid #1c3253", fontSize: 13 }
+        },
           React.createElement("span", null, p.name + " (" + p.pos + ")"),
           React.createElement("b", { style: { color: "#ffd23f" } }, sc)
         );
@@ -1482,8 +1541,10 @@ function PlayersScoresTab(props) {
   var rows = filtered.map(function (p) {
     var tot = totals[p.id] || 0;
     var recent = recentScores[p.id] || 0;
+    var recentStat = maxGwId ? (gwstatsAll[maxGwId] || {})[p.id] : null;
     return React.createElement("div", {
-      key: p.id, style: { display: "flex", justifyContent: "space-between", padding: "8px 10px", borderRadius: 8, marginBottom: 6, background: "#1c3253" }
+      key: p.id, onClick: function (pid, stat, lbl) { return function () { openPlayerBreakdown(pid, stat, lbl); }; }(p.id, recentStat, maxGwId ? ("GW" + maxGwNum) : ""),
+      style: { display: "flex", justifyContent: "space-between", padding: "8px 10px", borderRadius: 8, marginBottom: 6, background: "#1c3253" }
     },
       React.createElement("div", null,
         React.createElement("div", { style: { fontWeight: 600, fontSize: 14 } }, p.name),
@@ -1623,7 +1684,7 @@ function AdminPlayers(props) {
   var clubOptions = ALL_CLUBS.map(function (c) { return React.createElement("option", { key: c, value: c }, c); });
   var clubFilterOptions = [React.createElement("option", { key: "ALL", value: "ALL" }, "All clubs")].concat(clubOptions);
 
-  var editArr = React.useState({ price: "", club: "", pos: "" });
+  var editArr = React.useState({ name: "", price: "", club: "", pos: "" });
   var editVals = editArr[0];
   var setEditVals = editArr[1];
 
@@ -1632,7 +1693,10 @@ function AdminPlayers(props) {
     return React.createElement("div", { key: p.id, style: { padding: "6px 8px", borderBottom: "1px solid #1c3253", fontSize: 13 } },
       editId === p.id
         ? React.createElement("div", null,
-            React.createElement("div", { style: { fontWeight: 700, marginBottom: 6 } }, dbP.name),
+            React.createElement("input", {
+              value: editVals.name, onChange: function (e) { setEditVals(Object.assign({}, editVals, { name: e.target.value })); },
+              style: { width: "100%", padding: 6, borderRadius: 6, marginBottom: 6, background: "#1c3253", color: "#fff", border: "none", fontWeight: 700 }
+            }),
             React.createElement("div", { style: { display: "flex", gap: 6, marginBottom: 6 } },
               React.createElement("select", {
                 value: editVals.club, onChange: function (e) { setEditVals(Object.assign({}, editVals, { club: e.target.value })); },
@@ -1650,7 +1714,7 @@ function AdminPlayers(props) {
               }),
               React.createElement("button", {
                 onClick: function (id) { return function () {
-                  window.db.ref("players/" + id).update({ price: parseFloat(editVals.price), club: editVals.club, pos: editVals.pos });
+                  window.db.ref("players/" + id).update({ name: editVals.name.trim(), price: parseFloat(editVals.price), club: editVals.club, pos: editVals.pos });
                   setEditId(null);
                 }; }(p.id)
               }, "Save"),
@@ -1662,7 +1726,7 @@ function AdminPlayers(props) {
             React.createElement("div", null, dbP.name + " (" + dbP.pos + ", " + dbP.club + ")"),
             React.createElement("div", null,
               fmtMoney(dbP.price) + "  ",
-              React.createElement("button", { onClick: function (id, d) { return function () { setEditId(id); setEditVals({ price: String(d.price), club: d.club, pos: d.pos }); }; }(p.id, dbP) }, "Edit"),
+              React.createElement("button", { onClick: function (id, d) { return function () { setEditId(id); setEditVals({ name: d.name, price: String(d.price), club: d.club, pos: d.pos }); }; }(p.id, dbP) }, "Edit"),
               React.createElement("button", {
                 onClick: function (id, name) { return function () { deletePlayer(id, name); }; }(p.id, dbP.name),
                 style: { marginLeft: 6, color: "#ff9a9a" }
@@ -2447,10 +2511,27 @@ function MyTeam(props) {
     );
   }
 
+  var gwstatsAll = props.gwstats || {};
+  var gwstatsKeysAll = Object.keys(gwstatsAll);
+  var maxSyncedGwNum = 0;
+  var maxSyncedGwId = null;
+  for (var gsx = 0; gsx < gwstatsKeysAll.length; gsx++) {
+    var gn = parseInt(gwstatsKeysAll[gsx].replace("gw", ""), 10);
+    if (!isNaN(gn) && gn > maxSyncedGwNum) { maxSyncedGwNum = gn; maxSyncedGwId = gwstatsKeysAll[gsx]; }
+  }
+  var latestStats = maxSyncedGwId ? gwstatsAll[maxSyncedGwId] : {};
+  var effIdsForWeek = maxSyncedGwNum ? effectiveSquad(team, maxSyncedGwNum) : (team.playerIds || []);
+  var teamWeeklyPoints = 0;
+  for (var wpi = 0; wpi < effIdsForWeek.length; wpi++) {
+    var wpl = PLAYERS_BY_ID[effIdsForWeek[wpi]];
+    if (wpl) teamWeeklyPoints += computeScore(latestStats[effIdsForWeek[wpi]], wpl.pos);
+  }
+
   var squadRows = sortIdsByPos(team.playerIds || []).map(function (id) {
     var pl = PLAYERS_BY_ID[id];
     if (!pl) return null;
     var isOut = outId === id;
+    var pts = maxSyncedGwId ? computeScore(latestStats[id], pl.pos) : null;
     return React.createElement("div", {
       key: id, onClick: function (pid) { return function () { doRemove(pid); }; }(id),
       style: { display: "flex", justifyContent: "space-between", padding: "8px 10px", borderRadius: 8, marginBottom: 6, background: isOut ? "#c0392b" : "#1c3253" }
@@ -2459,7 +2540,13 @@ function MyTeam(props) {
         React.createElement("div", { style: { fontWeight: 600, fontSize: 14 } }, pl.name),
         React.createElement("div", { style: { fontSize: 11, opacity: 0.7 } }, pl.pos + " \u00b7 " + pl.club)
       ),
-      React.createElement("div", { style: { fontWeight: 700, color: "#ffd23f" } }, fmtMoney(pl.price))
+      React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
+        pts !== null ? React.createElement("button", {
+          onClick: function (pid, st, lbl) { return function (e) { e.stopPropagation(); openPlayerBreakdown(pid, st, lbl); }; }(id, latestStats[id], "GW" + maxSyncedGwNum),
+          style: { background: "#274b8c", border: "none", borderRadius: 8, padding: "4px 8px", color: "#ffd23f", fontWeight: 700, fontSize: 12 }
+        }, pts + " pts") : null,
+        React.createElement("div", { style: { fontWeight: 700, color: "#ffd23f" } }, fmtMoney(pl.price))
+      )
     );
   });
 
@@ -2469,13 +2556,18 @@ function MyTeam(props) {
       var pl = PLAYERS_BY_ID[id];
       if (!pl) return null;
       var isOut = outId === id;
+      var pts = maxSyncedGwId ? computeScore(latestStats[id], pl.pos) : null;
       return React.createElement("div", {
         key: id, onClick: function (pid) { return function () { doRemove(pid); }; }(id),
         style: { background: isOut ? "#c0392b" : "#274b8c", borderRadius: 10, padding: "8px 6px", textAlign: "center", flex: 1, minWidth: 78, margin: 3 }
       },
         React.createElement("div", { style: { fontSize: 12, fontWeight: 700 } }, pl.name),
         React.createElement("div", { style: { fontSize: 10, opacity: 0.8 } }, pl.club),
-        React.createElement("div", { style: { fontSize: 11, color: "#ffd23f", fontWeight: 700 } }, fmtMoney(pl.price))
+        React.createElement("div", { style: { fontSize: 11, color: "#ffd23f", fontWeight: 700 } }, fmtMoney(pl.price)),
+        pts !== null ? React.createElement("button", {
+          onClick: function (pid, st, lbl) { return function (e) { e.stopPropagation(); openPlayerBreakdown(pid, st, lbl); }; }(id, latestStats[id], "GW" + maxSyncedGwNum),
+          style: { marginTop: 4, background: "#12233f", border: "none", borderRadius: 6, padding: "2px 6px", color: "#ffd23f", fontWeight: 700, fontSize: 11, width: "100%" }
+        }, pts + " pts") : null
       );
     });
     return React.createElement("div", { key: pos, style: { marginBottom: 10 } },
@@ -2524,6 +2616,7 @@ function MyTeam(props) {
     ) : null,
     React.createElement(Card, null,
       React.createElement("div", { style: { fontSize: 13, marginBottom: 4 } }, team.entrantName + " \u00b7 " + team.formation + " \u00b7 " + fmtMoney(team.cost || 0)),
+      maxSyncedGwId ? React.createElement("div", { style: { fontSize: 15, fontWeight: 800, color: "#6fcf6f", marginBottom: 4 } }, "\u26bd GW" + maxSyncedGwNum + ": " + teamWeeklyPoints + " pts") : React.createElement("div", { style: { fontSize: 12, opacity: 0.6, marginBottom: 4 } }, "No gameweek scores synced yet"),
       React.createElement("div", { style: { fontSize: 12, marginBottom: 4 } },
         "\ud83d\udcb0 Paid \u00a3" + teamPaid + " of \u00a380",
         teamOwed > 0 ? React.createElement("span", { style: { color: "#ff9a9a" } }, " \u2014 " + "\u00a3" + teamOwed + " still owed") : React.createElement("span", { style: { color: "#6fcf6f" } }, " \u2014 fully paid")
@@ -2665,6 +2758,54 @@ function AdminTab(props) {
 
 /* ---------------- Root App ---------------- */
 
+function openPlayerBreakdown(playerId, stat, gwLabel) {
+  window.dispatchEvent(new CustomEvent("dtShowBreakdown", { detail: { playerId: playerId, stat: stat || null, gwLabel: gwLabel || "" } }));
+}
+
+function PlayerBreakdownOverlay() {
+  var stateArr = React.useState(null);
+  var data = stateArr[0];
+  var setData = stateArr[1];
+
+  React.useEffect(function () {
+    function onShow(e) { setData(e.detail); }
+    window.addEventListener("dtShowBreakdown", onShow);
+    return function () { window.removeEventListener("dtShowBreakdown", onShow); };
+  }, []);
+
+  if (!data) return null;
+  var pl = PLAYERS_BY_ID[data.playerId];
+  if (!pl) return null;
+  var breakdown = scoreBreakdown(data.stat, pl.pos);
+  var lineRows = breakdown.lines.map(function (l, i) {
+    return React.createElement("div", { key: i, style: { display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #26406e", fontSize: 13 } },
+      React.createElement("span", null, l.label),
+      React.createElement("b", { style: { color: l.pts >= 0 ? "#6fcf6f" : "#ff9a9a" } }, (l.pts >= 0 ? "+" : "") + l.pts)
+    );
+  });
+
+  return React.createElement("div", {
+    onClick: function () { setData(null); },
+    style: { position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.75)", zIndex: 500, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }
+  },
+    React.createElement("div", {
+      onClick: function (e) { e.stopPropagation(); },
+      style: { background: "#152a4d", borderRadius: 16, padding: 18, maxWidth: 360, width: "100%", maxHeight: "80vh", overflowY: "auto" }
+    },
+      React.createElement("div", { style: { fontWeight: 800, fontSize: 17 } }, pl.name),
+      React.createElement("div", { style: { fontSize: 12, opacity: 0.7, marginBottom: 12 } }, pl.pos + " \u00b7 " + pl.club + (data.gwLabel ? " \u00b7 " + data.gwLabel : "")),
+      lineRows,
+      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginTop: 10, paddingTop: 10, borderTop: "1px solid #3d5a8a", fontWeight: 800, fontSize: 15 } },
+        React.createElement("span", null, "Total"),
+        React.createElement("span", { style: { color: "#ffd23f" } }, breakdown.total)
+      ),
+      React.createElement("div", { style: { marginTop: 14 } },
+        React.createElement(Btn, { variant: "ghost", onClick: function () { setData(null); } }, "Close")
+      )
+    )
+  );
+}
+
 function App() {
   var tabArr = React.useState("home");
   var tab = tabArr[0];
@@ -2777,7 +2918,8 @@ function App() {
   return React.createElement(React.Fragment, null,
     fbWarning,
     body,
-    React.createElement(TopNav, { tabs: tabs, active: tab, onSelect: setTab })
+    React.createElement(TopNav, { tabs: tabs, active: tab, onSelect: setTab }),
+    React.createElement(PlayerBreakdownOverlay, null)
   );
 }
 
