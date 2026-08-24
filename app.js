@@ -306,8 +306,31 @@ function fetchSofaScoreStatsForFixture(dateStr, home, away) {
   return fetch("/.netlify/functions/sofascore-proxy?action=day&date=" + day)
     .then(function (r) { return r.json(); })
     .then(function (dayData) {
+      if (dayData && dayData.error) {
+        throw new Error("Proxy error for " + day + ": " + dayData.error);
+      }
+      var evList = (dayData && dayData.events) || [];
       var ev = findSofaEventForMatch(dayData, home, away);
-      if (!ev) throw new Error("Couldn't find " + home + " v " + away + " on " + day + " in SofaScore's day list.");
+      if (!ev) {
+        var diag;
+        if (!dayData) {
+          diag = "response was empty/null";
+        } else if (!evList.length) {
+          var keys = Object.keys(dayData).join(",");
+          diag = evList.length + " events in response; top-level keys: [" + keys + "]";
+        } else {
+          var plNames = [];
+          for (var di = 0; di < evList.length && di < 6; di++) {
+            var de = evList[di];
+            var tourN = de.tournament && de.tournament.name ? de.tournament.name : "?";
+            var hN = de.homeTeam ? de.homeTeam.name : "?";
+            var aN = de.awayTeam ? de.awayTeam.name : "?";
+            plNames.push(tourN + ": " + hN + " v " + aN);
+          }
+          diag = evList.length + " events found, none matched. Sample: " + plNames.join(" | ");
+        }
+        throw new Error("Couldn't find " + home + " v " + away + " on " + day + " \u2014 " + diag);
+      }
       var homeConceded = ev.awayScore ? ev.awayScore.current : null;
       var awayConceded = ev.homeScore ? ev.homeScore.current : null;
       return fetch("/.netlify/functions/sofascore-proxy?action=lineups&event=" + ev.id)
