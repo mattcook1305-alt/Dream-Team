@@ -226,7 +226,7 @@ function normName(s) {
   if (!s) return "";
   return s.toString().toLowerCase()
     .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9 ]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
     .trim();
 }
 
