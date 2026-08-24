@@ -342,6 +342,75 @@ function fetchSofaScoreStatsForFixture(dateStr, home, away) {
     });
 }
 
+var fplBootstrapCache = null;
+
+function fetchFplBootstrap() {
+  if (fplBootstrapCache) return Promise.resolve(fplBootstrapCache);
+  return fetch("/.netlify/functions/fpl-proxy?action=bootstrap")
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (data && data.error) {
+        throw new Error("FPL proxy error: " + (typeof data.error === "string" ? data.error : JSON.stringify(data.error)));
+      }
+      if (!data || !data.elements) throw new Error("FPL bootstrap returned no player data.");
+      var teamNames = {};
+      var teams = data.teams || [];
+      for (var i = 0; i < teams.length; i++) teamNames[teams[i].id] = teams[i].name;
+      var elementsById = {};
+      for (var j = 0; j < data.elements.length; j++) elementsById[data.elements[j].id] = data.elements[j];
+      var result = { elementsById: elementsById, teamNames: teamNames };
+      fplBootstrapCache = result;
+      return result;
+    });
+}
+
+function mapFplLiveToUpdates(liveData, bootstrap) {
+  var updates = {};
+  var matchedCount = 0;
+  var unmatchedNames = [];
+  var liveElements = (liveData && liveData.elements) || [];
+  for (var j = 0; j < liveElements.length; j++) {
+    var le = liveElements[j];
+    var stat = le.stats || {};
+    if (!stat.minutes) continue;
+    var meta = bootstrap.elementsById[le.id];
+    if (!meta) continue;
+    var clubName = bootstrap.teamNames[meta.team] || "";
+    var localP = findLocalPlayerMatch(meta.web_name, clubName) || findLocalPlayerMatch(meta.first_name + " " + meta.second_name, clubName);
+    if (!localP) { unmatchedNames.push(meta.web_name + " (" + clubName + ")"); continue; }
+    matchedCount++;
+    var cbit = (stat.clearances_blocks_interceptions || 0) + (stat.tackles || 0) + (stat.recoveries || 0);
+    updates[localP.id] = {
+      mins: stat.minutes || 0,
+      goals: stat.goals_scored || 0,
+      assists: stat.assists || 0,
+      ownGoals: stat.own_goals || 0,
+      yellow: stat.yellow_cards || 0,
+      red: (stat.red_cards || 0) > 0,
+      goalsConceded: stat.goals_conceded || 0,
+      saves: stat.saves || 0,
+      penSaveGK: stat.penalties_saved || 0,
+      penMissTaker: stat.penalties_missed || 0,
+      cbit: cbit,
+      bonus: stat.bonus || 0
+    };
+  }
+  return { updates: updates, matchedCount: matchedCount, unmatchedNames: unmatchedNames };
+}
+
+function fetchFplStatsForGw(gwNum) {
+  return fetchFplBootstrap().then(function (bootstrap) {
+    return fetch("/.netlify/functions/fpl-proxy?action=live&gw=" + gwNum)
+      .then(function (r) { return r.json(); })
+      .then(function (liveData) {
+        if (liveData && liveData.error) {
+          throw new Error("FPL proxy error: " + (typeof liveData.error === "string" ? liveData.error : JSON.stringify(liveData.error)));
+        }
+        return mapFplLiveToUpdates(liveData, bootstrap);
+      });
+  });
+}
+
 function mapApiStatsToUpdates(matches, apiDataByFixture) {
   var updates = {};
   var matchedCount = 0;
@@ -1713,40 +1782,20 @@ function AdminStats(props) {
 
   function syncStatsFromApi() {
     var gwId = "gw" + gw;
-    var fx = (fixturesObj && fixturesObj[gwId]) || { matches: [] };
-    var matches = fx.matches || [];
-    if (!matches.length) { setSyncMsg("No fixtures stored for this gameweek \u2014 sync fixtures first."); return; }
-    setSyncMsg("Fetching stats from SofaScore for " + matches.length + " fixture(s)...");
-    var promises = matches.map(function (m) {
-      return fetchSofaScoreStatsForFixture(m.date, m.home, m.away).catch(function (e) {
-        return { updates: {}, matchedCount: 0, unmatchedNames: [], error: (m.home + " v " + m.away + ": " + (e && e.message ? e.message : e)) };
-      });
-    });
-    Promise.all(promises).then(function (results) {
-      var allUpdates = {};
-      var totalMatched = 0;
-      var allUnmatched = [];
-      var errors = [];
-      for (var ri = 0; ri < results.length; ri++) {
-        var r = results[ri];
-        totalMatched += r.matchedCount;
-        allUnmatched = allUnmatched.concat(r.unmatchedNames);
-        if (r.error) errors.push(r.error);
-        for (var pid in r.updates) allUpdates[pid] = r.updates[pid];
-      }
+    var gwNum = parseInt(gw, 10);
+    setSyncMsg("Fetching stats from the FPL API for GW" + gwNum + "...");
+    fetchFplStatsForGw(gwNum).then(function (mapped) {
       var writes = [];
-      for (var pid2 in allUpdates) {
-        writes.push(window.db.ref("gwstats/" + gwId + "/" + pid2).update(allUpdates[pid2]));
+      for (var pid in mapped.updates) {
+        writes.push(window.db.ref("gwstats/" + gwId + "/" + pid).update(mapped.updates[pid]));
       }
-      Promise.all(writes).then(function () {
-        var statsForGwLocal = Object.assign({}, statsObj, allUpdates);
+      return Promise.all(writes).then(function () {
+        var statsForGwLocal = Object.assign({}, statsObj, mapped.updates);
         return recomputeResultsForGw(gwId, statsForGwLocal).then(function () {
-          var msg = "Matched " + totalMatched + " players from SofaScore. Scores recalculated.";
-          if (allUnmatched.length) {
-            msg += " Couldn't match: " + allUnmatched.slice(0, 8).join(", ") + (allUnmatched.length > 8 ? " +" + (allUnmatched.length - 8) + " more" : "") + " \u2014 enter these manually below.";
+          var msg = "Matched " + mapped.matchedCount + " players from the FPL API. Scores recalculated (bonus points included).";
+          if (mapped.unmatchedNames.length) {
+            msg += " Couldn't match: " + mapped.unmatchedNames.slice(0, 8).join(", ") + (mapped.unmatchedNames.length > 8 ? " +" + (mapped.unmatchedNames.length - 8) + " more" : "") + " \u2014 enter these manually below.";
           }
-          if (errors.length) msg += " Errors: " + errors.join(" | ");
-          msg += " Bonus points still need entering manually.";
           setSyncMsg(msg);
         });
       });
@@ -1789,50 +1838,39 @@ function AdminStats(props) {
       var fixtureWrites = [];
       for (var i = 0; i < gwKeys.length; i++) fixtureWrites.push(window.db.ref("fixtures/" + gwKeys[i]).set(byGw[gwKeys[i]]));
       return Promise.all(fixtureWrites).then(function () {
-        var finishedByGw = {};
+        var finishedGwNumsAll = [];
         for (var gk = 0; gk < gwKeys.length; gk++) {
           var finished = byGw[gwKeys[gk]].matches.filter(function (m) { return m.status === "FINISHED"; });
-          if (finished.length) finishedByGw[gwKeys[gk]] = finished;
+          if (finished.length) finishedGwNumsAll.push(byGw[gwKeys[gk]].gw);
         }
-        var finishedGwKeysAll = Object.keys(finishedByGw);
-        if (!finishedGwKeysAll.length) {
+        if (!finishedGwNumsAll.length) {
           setSyncMsg("Fixtures synced (" + gwKeys.length + " gameweeks). No finished matches yet to pull stats for.");
           return null;
         }
         return window.db.ref("results").once("value").then(function (snap) {
           var already = snap.val() || {};
-          var finishedGwKeys = finishedGwKeysAll.filter(function (k) { return !already[k]; });
-          if (!finishedGwKeys.length) {
+          var finishedGwNums = finishedGwNumsAll.filter(function (n) { return !already["gw" + n]; });
+          if (!finishedGwNums.length) {
             setSyncMsg("Fixtures synced (" + gwKeys.length + " gameweeks). All finished gameweeks are already synced \u2014 previous games left untouched. Use \"Sync stats for this GW only\" to force a re-check on a specific week.");
             return null;
           }
-          setSyncMsg("Fetching SofaScore stats for " + finishedGwKeys.length + " finished gameweek(s)...");
-          var gwPromises = finishedGwKeys.map(function (gwId3) {
-            var ms = finishedByGw[gwId3];
-            var matchPromises = ms.map(function (m) {
-              return fetchSofaScoreStatsForFixture(m.date, m.home, m.away).catch(function (e) {
-                return { updates: {}, matchedCount: 0, unmatchedNames: [], error: (m.home + " v " + m.away + ": " + (e && e.message ? e.message : e)) };
-              });
-            });
-            return Promise.all(matchPromises).then(function (results) {
-              var statsForGwLocal = {};
-              var matched = 0;
-              var unmatched = 0;
-              for (var ri = 0; ri < results.length; ri++) {
-                matched += results[ri].matchedCount;
-                unmatched += results[ri].unmatchedNames.length;
-                for (var pid in results[ri].updates) statsForGwLocal[pid] = results[ri].updates[pid];
-              }
-              return { gwId: gwId3, stats: statsForGwLocal, matched: matched, unmatched: unmatched };
+          setSyncMsg("Fetching FPL stats for " + finishedGwNums.length + " finished gameweek(s)...");
+          var gwPromises = finishedGwNums.map(function (n) {
+            return fetchFplStatsForGw(n).then(function (mapped) {
+              return { gwId: "gw" + n, stats: mapped.updates, matched: mapped.matchedCount, unmatched: mapped.unmatchedNames.length };
+            }).catch(function (e) {
+              return { gwId: "gw" + n, stats: {}, matched: 0, unmatched: 0, error: "GW" + n + ": " + (e && e.message ? e.message : e) };
             });
           });
           return Promise.all(gwPromises).then(function (gwResults) {
             var totalMatched = 0;
             var totalUnmatched = 0;
+            var errors = [];
             var statWrites = [];
             for (var g = 0; g < gwResults.length; g++) {
               totalMatched += gwResults[g].matched;
               totalUnmatched += gwResults[g].unmatched;
+              if (gwResults[g].error) errors.push(gwResults[g].error);
               for (var pid2 in gwResults[g].stats) {
                 statWrites.push(window.db.ref("gwstats/" + gwResults[g].gwId + "/" + pid2).update(gwResults[g].stats[pid2]));
               }
@@ -1841,7 +1879,9 @@ function AdminStats(props) {
             return Promise.all(statWrites).then(function () {
               var resultWrites = gwResults.map(function (r) { return recomputeResultsForGw(r.gwId, r.stats); });
               return Promise.all(resultWrites).then(function () {
-                setSyncMsg("Done. " + gwKeys.length + " gameweeks of fixtures, stats pulled for " + finishedGwKeys.length + " finished gameweek(s), " + totalMatched + " players matched" + (totalUnmatched ? (", " + totalUnmatched + " unmatched (check per-gameweek view)") : "") + ". Bonus still needs entering by hand.");
+                var msg = "Done. " + gwKeys.length + " gameweeks of fixtures, stats pulled for " + finishedGwNums.length + " finished gameweek(s), " + totalMatched + " players matched (bonus points included)" + (totalUnmatched ? (", " + totalUnmatched + " unmatched (check per-gameweek view)") : "") + ".";
+                if (errors.length) msg += " Errors: " + errors.join(" | ");
+                setSyncMsg(msg);
               });
             });
           });
@@ -1894,7 +1934,7 @@ function AdminStats(props) {
 
   return React.createElement(Card, null,
     React.createElement(Btn, { onClick: syncEverything }, "\u21bb Sync fixtures + stats"),
-    React.createElement("div", { style: { fontSize: 11, opacity: 0.7, margin: "8px 0 14px" } }, "Pulls all season fixtures from football-data.org (free), then match stats from SofaScore for every finished gameweek, then recalculates every team's scores. SofaScore is an unofficial source \u2014 if a sync looks wrong or comes back empty, check the per-gameweek view below and top up by hand."),
+    React.createElement("div", { style: { fontSize: 11, opacity: 0.7, margin: "8px 0 14px" } }, "Pulls all season fixtures from football-data.org (free), then match stats from the official Fantasy Premier League API for every finished gameweek (goals, assists, cards, defensive contribution, and bonus points all included), then recalculates every team's scores. If a sync looks wrong or comes back empty, check the per-gameweek view below and top up by hand."),
     React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 10, alignItems: "center", flexWrap: "wrap", borderTop: "1px solid #1c3253", paddingTop: 12 } },
       React.createElement("span", { style: { fontSize: 13 } }, "Gameweek"),
       React.createElement("input", { value: gw, onChange: function (e) { setGw(e.target.value); }, style: { width: 50, padding: 6, background: "#1c3253", color: "#fff", border: "none", borderRadius: 6 } }),
