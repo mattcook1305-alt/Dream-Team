@@ -1794,7 +1794,7 @@ function AdminStats(props) {
         return recomputeResultsForGw(gwId, statsForGwLocal).then(function () {
           var msg = "Matched " + mapped.matchedCount + " players from the FPL API. Scores recalculated (bonus points included).";
           if (mapped.unmatchedNames.length) {
-            msg += " Couldn't match: " + mapped.unmatchedNames.slice(0, 8).join(", ") + (mapped.unmatchedNames.length > 8 ? " +" + (mapped.unmatchedNames.length - 8) + " more" : "") + " \u2014 enter these manually below.";
+            msg += " Couldn't match: " + mapped.unmatchedNames.join(", ") + " \u2014 enter these manually below.";
           }
           setSyncMsg(msg);
         });
