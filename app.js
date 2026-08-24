@@ -506,6 +506,15 @@ function canonClub(normed) {
   return CLUB_ALIASES[normed] || normed;
 }
 
+function extractSurname(normed) {
+  var tokens = normed.split(" ").filter(function (t) { return t.length > 0; });
+  if (tokens.length === 2) {
+    if (tokens[0].length === 1 && tokens[1].length > 1) return tokens[1];
+    if (tokens[1].length === 1 && tokens[0].length > 1) return tokens[0];
+  }
+  return tokens.length ? tokens[tokens.length - 1] : "";
+}
+
 function findLocalPlayerMatch(apiName, clubName) {
   var target = normName(apiName);
   var targetClub = canonClub(normName(clubName));
@@ -517,8 +526,8 @@ function findLocalPlayerMatch(apiName, clubName) {
     var clubOk = targetClub && (pc.indexOf(targetClub) >= 0 || targetClub.indexOf(pc) >= 0);
     if (pn === target && clubOk) return p;
     if (pn === target && !best) best = p;
-    var lastTarget = target.split(" ").slice(-1)[0];
-    var lastLocal = pn.split(" ").slice(-1)[0];
+    var lastTarget = extractSurname(target);
+    var lastLocal = extractSurname(pn);
     if (clubOk && lastTarget && lastTarget === lastLocal && lastTarget.length > 2) best = best || p;
   }
   return best;
