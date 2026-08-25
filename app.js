@@ -1316,10 +1316,10 @@ function LeagueTable(props) {
     );
   }
 
-  var gwSelectOptions = [React.createElement("option", { key: "overall", value: "overall" }, "Overall")];
-  for (var g = 0; g < gwOptionsArr.length; g++) {
-    gwSelectOptions.push(React.createElement("option", { key: gwOptionsArr[g], value: gwOptionsArr[g] }, "Gameweek " + gwOptionsArr[g]));
-  }
+  var latestSyncedGw = gwOptionsArr.length ? gwOptionsArr[gwOptionsArr.length - 1] : null;
+  var gwPickOptions = gwOptionsArr.map(function (n) {
+    return React.createElement("option", { key: n, value: n }, "Gameweek " + n);
+  });
 
   var rows = rowsData.map(function (row, idx) {
     return React.createElement("div", {
@@ -1338,10 +1338,22 @@ function LeagueTable(props) {
   return React.createElement(React.Fragment, null,
     React.createElement(Header, { sub: "League table" }),
     React.createElement(Card, null,
-      React.createElement("select", {
-        value: gwSel, onChange: function (e) { setGwSel(e.target.value === "overall" ? "overall" : parseInt(e.target.value, 10)); },
+      React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" } },
+        React.createElement("button", {
+          onClick: function () { if (latestSyncedGw) setGwSel(latestSyncedGw); },
+          disabled: !latestSyncedGw,
+          style: { flex: 1, padding: "10px 8px", borderRadius: 8, border: "none", fontWeight: 700, fontSize: 12, background: gwSel === latestSyncedGw ? "#ffd23f" : "#1c3253", color: gwSel === latestSyncedGw ? "#12233f" : "#fff", opacity: latestSyncedGw ? 1 : 0.5 }
+        }, "Current gameweek"),
+        React.createElement("button", {
+          onClick: function () { setGwSel("overall"); },
+          style: { flex: 1, padding: "10px 8px", borderRadius: 8, border: "none", fontWeight: 700, fontSize: 12, background: gwSel === "overall" ? "#ffd23f" : "#1c3253", color: gwSel === "overall" ? "#12233f" : "#fff" }
+        }, "Overall")
+      ),
+      gwPickOptions.length ? React.createElement("select", {
+        value: gwSel === "overall" ? "" : gwSel,
+        onChange: function (e) { if (e.target.value) setGwSel(parseInt(e.target.value, 10)); },
         style: { width: "100%", padding: 10, borderRadius: 8, marginBottom: 10, background: "#1c3253", color: "#fff", border: "none", fontSize: 14 }
-      }, gwSelectOptions),
+      }, [React.createElement("option", { key: "pick", value: "" }, "Or pick a specific gameweek\u2026")].concat(gwPickOptions)) : null,
       canViewDetail ? React.createElement("div", { style: { fontSize: 11, opacity: 0.6, marginBottom: 8 } }, "Tap a team to see " + (gwSel === "overall" ? "their score history" : "their player-by-player score for that week")) : null,
       rowsData.length ? rows : React.createElement("div", { style: { opacity: 0.7, fontSize: 13 } }, "No teams entered yet.")
     )
