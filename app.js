@@ -964,6 +964,54 @@ function TeamBuilder(props) {
       });
       return;
     }
+    if (props.mode === "transfer") {
+      var initial = props.initialSelected || [];
+      var outIds = initial.filter(function (id) { return selected.indexOf(id) < 0; });
+      var inIds = selected.filter(function (id) { return initial.indexOf(id) < 0; });
+      if (outIds.length === 0) { setMsg("No changes made yet."); return; }
+      var limit = props.transferKind === "emergency" ? 1 : (props.transferKind === "window" ? props.maxChanges : Infinity);
+      if (outIds.length > limit) {
+        setMsg(props.transferKind === "emergency"
+          ? "Emergency transfer only allows swapping one player \u2014 you've changed " + outIds.length + "."
+          : "Only " + limit + " transfer" + (limit === 1 ? "" : "s") + " left this window \u2014 you've changed " + outIds.length + ".");
+        return;
+      }
+      if (props.transferKind === "emergency") {
+        var pend = {
+          outId: outIds[0], inId: inIds[0],
+          outName: (PLAYERS_BY_ID[outIds[0]] || {}).name || "",
+          inName: (PLAYERS_BY_ID[inIds[0]] || {}).name || "",
+          effectiveGw: props.emergencyEffectiveGw,
+          newFormation: finalFormation
+        };
+        window.db.ref("teams/" + props.teamId).update({
+          emergencyUsed: true,
+          pendingEmergency: pend
+        }).then(function () {
+          if (props.onSaved) props.onSaved();
+        });
+        return;
+      }
+      var log = props.transferLog || [];
+      var newEntries = outIds.map(function (outIdX, i) {
+        return {
+          type: "window", windowIndex: props.windowIndex,
+          outId: outIdX, inId: inIds[i],
+          outName: (PLAYERS_BY_ID[outIdX] || {}).name || "",
+          inName: (PLAYERS_BY_ID[inIds[i]] || {}).name || "",
+          timestamp: nowMs()
+        };
+      });
+      window.db.ref("teams/" + props.teamId).update({
+        formation: finalFormation,
+        playerIds: selected,
+        cost: cost,
+        transferLog: log.concat(newEntries)
+      }).then(function () {
+        if (props.onSaved) props.onSaved();
+      });
+      return;
+    }
     var reg = props.regInfo || {};
     var newRef = window.db.ref("teams").push();
     var code = newRef.key.slice(-6).toUpperCase();
@@ -1094,7 +1142,7 @@ function TeamBuilder(props) {
     React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
       React.createElement(Btn, { variant: "ghost", onClick: function () { setShowFormPicker(true); } }, "Change formation"),
       React.createElement(Btn, { variant: "ghost", onClick: function () { setView(view === "pitch" ? "list" : "pitch"); } }, view === "pitch" ? "List view" : "Pitch view"),
-      props.mode === "edit" && selected.length === CFG.squadSize ? React.createElement(Btn, { onClick: submitTeam }, "Save team") : null
+      (props.mode === "edit" || props.mode === "transfer") && selected.length === CFG.squadSize ? React.createElement(Btn, { onClick: submitTeam }, props.mode === "transfer" ? "Confirm transfer" : "Save team") : null
     ),
     msg ? React.createElement("div", { style: { fontSize: 12, color: "#ffd23f", marginTop: 8 } }, msg) : null
   );
@@ -1175,17 +1223,17 @@ function TeamBuilder(props) {
   var footer = null;
   if (selected.length === CFG.squadSize) {
     footer = React.createElement(Card, null,
-      props.mode === "edit" ? null : React.createElement("div", { style: { fontSize: 13, marginBottom: 10 } }, "Team: " + ((props.regInfo && props.regInfo.teamName) || "") + " \u00b7 Manager: " + ((props.regInfo && props.regInfo.entrantName) || "")),
+      (props.mode === "edit" || props.mode === "transfer") ? null : React.createElement("div", { style: { fontSize: 13, marginBottom: 10 } }, "Team: " + ((props.regInfo && props.regInfo.teamName) || "") + " \u00b7 Manager: " + ((props.regInfo && props.regInfo.entrantName) || "")),
       msg ? React.createElement("div", { style: { fontSize: 12, color: "#ffd23f", marginBottom: 8 } }, msg) : null,
-      React.createElement(Btn, { onClick: submitTeam }, props.mode === "edit" ? "Save team" : ("Submit team (\u00a3" + CFG.entryFee + " entry)"))
+      React.createElement(Btn, { onClick: submitTeam }, props.mode === "edit" ? "Save team" : props.mode === "transfer" ? "Confirm transfer" : ("Submit team (\u00a3" + CFG.entryFee + " entry)"))
     );
   } else if (msg) {
     footer = React.createElement(Card, null, React.createElement("div", { style: { fontSize: 12, color: "#ffd23f" } }, msg));
   }
 
   return React.createElement(React.Fragment, null,
-    React.createElement(Header, { sub: props.mode === "edit" ? "Edit your team" : "Build your team" }),
-    props.mode === "edit" && props.onCancel
+    React.createElement(Header, { sub: props.mode === "edit" ? "Edit your team" : props.mode === "transfer" ? ("Make a transfer" + (props.transferKind === "emergency" ? " (emergency)" : "")) : "Build your team" }),
+    (props.mode === "edit" || props.mode === "transfer") && props.onCancel
       ? React.createElement(Card, null, React.createElement(Btn, { variant: "ghost", onClick: props.onCancel }, "\u2190 Cancel, discard changes"))
       : null,
     summary,
@@ -2302,18 +2350,15 @@ function MyTeam(props) {
   var errArr = React.useState("");
   var err = errArr[0];
   var setErr = errArr[1];
-  var outArr = React.useState(null);
-  var outId = outArr[0];
-  var setOutId = outArr[1];
+  var transferModeArr = React.useState(null);
+  var transferMode = transferModeArr[0];
+  var setTransferMode = transferModeArr[1];
   var editingArr = React.useState(false);
   var editing = editingArr[0];
   var setEditing = editingArr[1];
   var squadViewArr = React.useState("list");
   var squadView = squadViewArr[0];
   var setSquadView = squadViewArr[1];
-  var modeArr = React.useState(null);
-  var mode = modeArr[0];
-  var setMode = modeArr[1];
   var msgArr = React.useState("");
   var msg = msgArr[0];
   var setMsg = msgArr[1];
@@ -2371,6 +2416,7 @@ function MyTeam(props) {
     var entry = { type: "emergency", outId: pend.outId, inId: pend.inId, outName: pend.outName, inName: pend.inName, timestamp: nowMs() };
     window.db.ref("teams/" + foundId).update({
       playerIds: newIds,
+      formation: pend.newFormation || t.formation,
       cost: squadCost(newIds),
       pendingEmergency: null,
       transferLog: (t.transferLog || []).concat([entry])
@@ -2463,87 +2509,25 @@ function MyTeam(props) {
     });
   }
 
-  function doRemove(id) { setOutId(id); setMode(null); }
-
-  function startTransfer(kind) {
-    if (!outId) { setMsg("Pick a player to transfer out first."); return; }
-    setMode(kind);
-    setMsg("");
-  }
-
-  function completeTransfer(inId) {
-    var outPl = PLAYERS_BY_ID[outId];
-    var inPl = PLAYERS_BY_ID[inId];
-    if (!outPl || !inPl) return;
-    var ids = team.playerIds || [];
-    var idx = ids.indexOf(outId);
-    if (idx < 0) return;
-    var newIds = ids.slice(0, idx).concat([inId]).concat(ids.slice(idx + 1));
-    if (squadCost(newIds) > CFG.budgetCap) { setMsg("That would take the squad over " + fmtMoney(CFG.budgetCap) + "."); return; }
-    var cc = clubCounts(ids.slice(0, idx).concat(ids.slice(idx + 1)));
-    if ((cc[inPl.club] || 0) >= CFG.maxPerClub) { setMsg("Already have " + CFG.maxPerClub + " players from " + inPl.club + "."); return; }
-
-    if (mode === "window") {
-      var entry = { type: "window", windowIndex: winIdx, outId: outId, inId: inId, outName: outPl.name, inName: inPl.name, timestamp: now };
-      window.db.ref("teams/" + foundId).update({
-        playerIds: newIds,
-        cost: squadCost(newIds),
-        transferLog: log.concat([entry])
-      }).then(function () {
-        setOutId(null);
-        setMode(null);
-        setMsg("Transfer complete.");
-      });
-    } else if (mode === "unlimited") {
-      var freeEntry = { type: "unlimited", outId: outId, inId: inId, outName: outPl.name, inName: inPl.name, timestamp: now };
-      window.db.ref("teams/" + foundId).update({
-        playerIds: newIds,
-        cost: squadCost(newIds),
-        transferLog: log.concat([freeEntry])
-      }).then(function () {
-        setOutId(null);
-        setMode(null);
-        setMsg("Swap complete \u2014 unlimited changes are still available until midnight 16th August.");
-      });
-    } else if (mode === "emergency") {
-      var pendingEntry = { outId: outId, inId: inId, outName: outPl.name, inName: inPl.name, effectiveGw: currentGw + 1, requestedAt: now };
-      window.db.ref("teams/" + foundId).update({
-        emergencyUsed: true,
-        pendingEmergency: pendingEntry
-      }).then(function () {
-        setOutId(null);
-        setMode(null);
-        setMsg("Emergency transfer locked in \u2014 it will take effect from the start of Gameweek " + (currentGw + 1) + " kick-off.");
-      });
-    }
-  }
-
-  if (mode) {
-    var outPos = PLAYERS_BY_ID[outId].pos;
-    var already = team.playerIds || [];
-    var eligible = ALL_PLAYERS.filter(function (p) {
-      return p.pos === outPos && already.indexOf(p.id) < 0;
+  if (transferMode === "window") {
+    return React.createElement(TeamBuilder, {
+      players: ALL_PLAYERS, gwstats: props.gwstats,
+      mode: "transfer", transferKind: "window",
+      teamId: foundId, initialSelected: team.playerIds || [],
+      windowIndex: winIdx, maxChanges: windowTransfersLeft, transferLog: team.transferLog || [],
+      onSaved: function () { setTransferMode(null); setMsg("Transfer(s) saved."); },
+      onCancel: function () { setTransferMode(null); }
     });
-    var rows = eligible.map(function (p) {
-      return React.createElement("div", {
-        key: p.id, onClick: function (pid) { return function () { completeTransfer(pid); }; }(p.id),
-        style: { display: "flex", justifyContent: "space-between", padding: "9px 10px", borderRadius: 8, marginBottom: 6, background: "#1c3253" }
-      },
-        React.createElement("div", null,
-          React.createElement("div", { style: { fontWeight: 600, fontSize: 14 } }, p.name),
-          React.createElement("div", { style: { fontSize: 11, opacity: 0.7 } }, p.club)
-        ),
-        React.createElement("div", { style: { fontWeight: 700, color: "#ffd23f" } }, fmtMoney(p.price))
-      );
+  }
+  if (transferMode === "emergency") {
+    return React.createElement(TeamBuilder, {
+      players: ALL_PLAYERS, gwstats: props.gwstats,
+      mode: "transfer", transferKind: "emergency",
+      teamId: foundId, initialSelected: team.playerIds || [],
+      emergencyEffectiveGw: currentGw + 1,
+      onSaved: function () { setTransferMode(null); setMsg("Emergency transfer locked in \u2014 it will take effect from the start of Gameweek " + (currentGw + 1) + " kick-off."); },
+      onCancel: function () { setTransferMode(null); }
     });
-    return React.createElement(React.Fragment, null,
-      React.createElement(Header, { sub: "Transfer in a " + POS_LABEL[outPos] }),
-      React.createElement(Card, null,
-        React.createElement(Btn, { variant: "ghost", onClick: function () { setMode(null); } }, "\u2190 Cancel"),
-        msg ? React.createElement("div", { style: { fontSize: 12, color: "#ff9a9a", margin: "10px 0" } }, msg) : null,
-        React.createElement("div", { style: { maxHeight: 420, overflowY: "auto", marginTop: 10 } }, rows)
-      )
-    );
   }
 
   var gwstatsAll = props.gwstats || {};
@@ -2565,21 +2549,18 @@ function MyTeam(props) {
   var squadRows = sortIdsByPos(team.playerIds || []).map(function (id) {
     var pl = PLAYERS_BY_ID[id];
     if (!pl) return null;
-    var isOut = outId === id;
     var pts = maxSyncedGwId ? computeScore(latestStats[id], pl.pos) : null;
     return React.createElement("div", {
-      key: id, onClick: function (pid) { return function () { doRemove(pid); }; }(id),
-      style: { display: "flex", justifyContent: "space-between", padding: "8px 10px", borderRadius: 8, marginBottom: 6, background: isOut ? "#c0392b" : "#1c3253" }
+      key: id,
+      onClick: pts !== null ? function (pid, st, lbl) { return function () { openPlayerBreakdown(pid, st, lbl); }; }(id, latestStats[id], "GW" + maxSyncedGwNum) : undefined,
+      style: { display: "flex", justifyContent: "space-between", padding: "8px 10px", borderRadius: 8, marginBottom: 6, background: "#1c3253" }
     },
       React.createElement("div", null,
         React.createElement("div", { style: { fontWeight: 600, fontSize: 14 } }, pl.name),
         React.createElement("div", { style: { fontSize: 11, opacity: 0.7 } }, pl.pos + " \u00b7 " + pl.club)
       ),
       React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
-        pts !== null ? React.createElement("button", {
-          onClick: function (pid, st, lbl) { return function (e) { e.stopPropagation(); openPlayerBreakdown(pid, st, lbl); }; }(id, latestStats[id], "GW" + maxSyncedGwNum),
-          style: { background: "#274b8c", border: "none", borderRadius: 8, padding: "4px 8px", color: "#ffd23f", fontWeight: 700, fontSize: 12 }
-        }, pts + " pts") : null,
+        pts !== null ? React.createElement("div", { style: { background: "#274b8c", borderRadius: 8, padding: "4px 8px", color: "#ffd23f", fontWeight: 700, fontSize: 12 } }, pts + " pts") : null,
         React.createElement("div", { style: { fontWeight: 700, color: "#ffd23f" } }, fmtMoney(pl.price))
       )
     );
@@ -2590,19 +2571,16 @@ function MyTeam(props) {
     var chips = groupedSquad[pos].map(function (id) {
       var pl = PLAYERS_BY_ID[id];
       if (!pl) return null;
-      var isOut = outId === id;
       var pts = maxSyncedGwId ? computeScore(latestStats[id], pl.pos) : null;
       return React.createElement("div", {
-        key: id, onClick: function (pid) { return function () { doRemove(pid); }; }(id),
-        style: { background: isOut ? "#c0392b" : "#274b8c", borderRadius: 10, padding: "8px 6px", textAlign: "center", flex: 1, minWidth: 78, margin: 3 }
+        key: id,
+        onClick: pts !== null ? function (pid, st, lbl) { return function () { openPlayerBreakdown(pid, st, lbl); }; }(id, latestStats[id], "GW" + maxSyncedGwNum) : undefined,
+        style: { background: "#274b8c", borderRadius: 10, padding: "8px 6px", textAlign: "center", flex: 1, minWidth: 78, margin: 3 }
       },
         React.createElement("div", { style: { fontSize: 12, fontWeight: 700 } }, pl.name),
         React.createElement("div", { style: { fontSize: 10, opacity: 0.8 } }, pl.club),
         React.createElement("div", { style: { fontSize: 11, color: "#ffd23f", fontWeight: 700 } }, fmtMoney(pl.price)),
-        pts !== null ? React.createElement("button", {
-          onClick: function (pid, st, lbl) { return function (e) { e.stopPropagation(); openPlayerBreakdown(pid, st, lbl); }; }(id, latestStats[id], "GW" + maxSyncedGwNum),
-          style: { marginTop: 4, background: "#12233f", border: "none", borderRadius: 6, padding: "2px 6px", color: "#ffd23f", fontWeight: 700, fontSize: 11, width: "100%" }
-        }, pts + " pts") : null
+        pts !== null ? React.createElement("div", { style: { marginTop: 4, background: "#12233f", borderRadius: 6, padding: "2px 6px", color: "#ffd23f", fontWeight: 700, fontSize: 11 } }, pts + " pts") : null
       );
     });
     return React.createElement("div", { key: pos, style: { marginBottom: 10 } },
@@ -2665,12 +2643,11 @@ function MyTeam(props) {
       )
     ),
     React.createElement(Card, null,
-      React.createElement("div", { style: { fontSize: 12, opacity: 0.7, marginBottom: 8 } }, outId ? "Tap a replacement type below, or tap another player to change your out choice." : "Tap a player to transfer them out."),
+      React.createElement("div", { style: { fontSize: 12, opacity: 0.7, marginBottom: 8 } }, "Tap a player to see their points breakdown for the latest gameweek."),
       squadView === "list" ? squadRows : squadPitchView,
-      outId ? React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" } },
-        preSeasonUnlimited ? React.createElement(Btn, { onClick: function () { startTransfer("unlimited"); } }, "Swap player") : null,
-        !preSeasonUnlimited && windowOpen && windowTransfersLeft > 0 ? React.createElement(Btn, { onClick: function () { startTransfer("window"); } }, "Use window transfer") : null,
-        !preSeasonUnlimited && emergencyAvailable ? React.createElement(Btn, { variant: "danger", onClick: function () { startTransfer("emergency"); } }, "Use emergency transfer") : null
+      !preSeasonUnlimited && (windowOpen && windowTransfersLeft > 0 || emergencyAvailable) ? React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" } },
+        windowOpen && windowTransfersLeft > 0 ? React.createElement(Btn, { onClick: function () { setTransferMode("window"); } }, "Use window transfer") : null,
+        emergencyAvailable ? React.createElement(Btn, { variant: "danger", onClick: function () { setTransferMode("emergency"); } }, "Use emergency transfer") : null
       ) : null,
       msg ? React.createElement("div", { style: { fontSize: 12, color: "#ffd23f", marginTop: 10 } }, msg) : null
     )
