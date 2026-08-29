@@ -267,6 +267,34 @@ function activeWindowIndex(windows, now) {
   return -1;
 }
 
+function nextUnstartedGw(fixturesObj, now, fallback) {
+  var gwKeys = Object.keys(fixturesObj || {});
+  var gwNums = gwKeys.map(function (k) { return fixturesObj[k] && fixturesObj[k].gw; }).filter(function (n) { return n; });
+  gwNums = gwNums.filter(function (n, i) { return gwNums.indexOf(n) === i; });
+  gwNums.sort(function (a, b) { return a - b; });
+  for (var i = 0; i < gwNums.length; i++) {
+    var gw = fixturesObj["gw" + gwNums[i]];
+    var matches = (gw && gw.matches) || [];
+    var anyKickedOff = matches.some(function (m) { return m.date && new Date(m.date).getTime() <= now; });
+    if (!anyKickedOff && matches.length) return gwNums[i];
+  }
+  return gwNums.length ? (gwNums[gwNums.length - 1] + 1) : fallback;
+}
+
+function gwHasStarted(fixturesObj, gwNum, now) {
+  var gw = fixturesObj && fixturesObj["gw" + gwNum];
+  if (!gw || !gw.matches || !gw.matches.length) return false;
+  var firstKickoff = Infinity;
+  for (var i = 0; i < gw.matches.length; i++) {
+    var m = gw.matches[i];
+    if (m.date) {
+      var t = new Date(m.date).getTime();
+      if (t < firstKickoff) firstKickoff = t;
+    }
+  }
+  return firstKickoff !== Infinity && now >= firstKickoff;
+}
+
 function inAnyPeriod(periods, now) {
   if (!periods) return false;
   for (var i = 0; i < periods.length; i++) {
@@ -2156,6 +2184,12 @@ function AdminEntrants(props) {
   var editVal = editValArr[0];
   var setEditVal = editValArr[1];
 
+  function fixEmergencyGw(tid, newGw) {
+    var n = parseInt(newGw, 10);
+    if (isNaN(n) || n < 1) return;
+    window.db.ref("teams/" + tid + "/pendingEmergency/effectiveGw").set(n);
+  }
+
   function setSweepstake(tid, club) {
     window.db.ref("teams/" + tid).update({ sweepstakeClub: club || null });
   }
@@ -2185,7 +2219,7 @@ function AdminEntrants(props) {
       var owed = 80 - totalPaid;
       var emStatus = "Not used";
       if (t.pendingEmergency) {
-        emStatus = t.pendingEmergency.effectiveGw <= currentGw
+        emStatus = gwHasStarted(props.fixtures, t.pendingEmergency.effectiveGw, nowMs())
           ? "Applied (from GW" + t.pendingEmergency.effectiveGw + ")"
           : "Pending, effective GW" + t.pendingEmergency.effectiveGw;
       } else if (t.emergencyUsed) {
@@ -2245,12 +2279,26 @@ function AdminEntrants(props) {
     var totalPaid = (pmt.a ? 40 : 0) + (pmt.b ? 20 : 0) + (pmt.c ? 20 : 0);
     var emStatus = "not used";
     if (t.pendingEmergency) {
-      emStatus = t.pendingEmergency.effectiveGw <= currentGw
+      emStatus = gwHasStarted(props.fixtures, t.pendingEmergency.effectiveGw, nowMs())
         ? "applied (from GW" + t.pendingEmergency.effectiveGw + ")"
         : "pending \u2014 auto-applies from GW" + t.pendingEmergency.effectiveGw;
     } else if (t.emergencyUsed) {
       emStatus = "used";
     }
+    var emergencyFix = t.pendingEmergency ? React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6, marginTop: 4 } },
+      React.createElement("span", { style: { fontSize: 11, opacity: 0.7 } }, "Correct effective GW:"),
+      React.createElement("input", {
+        type: "number", defaultValue: t.pendingEmergency.effectiveGw, id: "emgw-" + tid,
+        style: { width: 50, padding: 4, borderRadius: 6, background: "#12233f", color: "#fff", border: "1px solid #3d5a8a", fontSize: 12 }
+      }),
+      React.createElement("button", {
+        onClick: function (id) { return function () {
+          var el = document.getElementById("emgw-" + id);
+          if (el) fixEmergencyGw(id, el.value);
+        }; }(tid),
+        style: { padding: "4px 8px", borderRadius: 6, border: "none", background: "#1c3253", color: "#ffd23f", fontSize: 11, fontWeight: 700 }
+      }, "Fix")
+    ) : null;
     var payButtons = [
       { key: "a", label: "\u00a340" },
       { key: "b", label: "\u00a320" },
@@ -2309,6 +2357,7 @@ function AdminEntrants(props) {
       React.createElement("div", { style: { opacity: 0.6, fontSize: 11, marginTop: 2 } },
         "Paid \u00a3" + totalPaid + " of \u00a380 \u00b7 transfers logged: ", (t.transferLog || []).length, " \u00b7 emergency: ", emStatus
       ),
+      emergencyFix,
       React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6, marginTop: 6 } },
         React.createElement("span", { style: { fontSize: 11, opacity: 0.8 } }, "\ud83c\udfc6 Sweepstake team:"),
         React.createElement("select", {
@@ -2407,8 +2456,7 @@ function MyTeam(props) {
     var t = teamsObj[foundId];
     if (!t) return;
     var pend = t.pendingEmergency;
-    var curGw = (config.currentGameweek) || 1;
-    if (!pend || pend.effectiveGw > curGw) return;
+    if (!pend || !gwHasStarted(props.fixtures, pend.effectiveGw, nowMs())) return;
     var ids = t.playerIds || [];
     var idx = ids.indexOf(pend.outId);
     if (idx < 0) return;
@@ -2421,7 +2469,7 @@ function MyTeam(props) {
       pendingEmergency: null,
       transferLog: (t.transferLog || []).concat([entry])
     });
-  }, [foundId, teamsObj, config]);
+  }, [foundId, teamsObj, props.fixtures]);
 
   if (matchIds.length > 0 && !foundId) {
     var pickRows = matchIds.map(function (id) {
@@ -2524,8 +2572,8 @@ function MyTeam(props) {
       players: ALL_PLAYERS, gwstats: props.gwstats,
       mode: "transfer", transferKind: "emergency",
       teamId: foundId, initialSelected: team.playerIds || [],
-      emergencyEffectiveGw: currentGw + 1,
-      onSaved: function () { setTransferMode(null); setMsg("Emergency transfer locked in \u2014 it will take effect from the start of Gameweek " + (currentGw + 1) + " kick-off."); },
+      emergencyEffectiveGw: nextUnstartedGw(props.fixtures, now, currentGw + 1),
+      onSaved: function () { setTransferMode(null); setMsg("Emergency transfer locked in \u2014 it will take effect from the start of Gameweek " + nextUnstartedGw(props.fixtures, now, currentGw + 1) + " kick-off."); },
       onCancel: function () { setTransferMode(null); }
     });
   }
@@ -2763,7 +2811,7 @@ function AdminTab(props) {
     sub === "stats" ? React.createElement(AdminStats, { teams: props.teams, fixtures: props.fixtures }) : null,
     sub === "fixtures" ? React.createElement(AdminFixtures, { fixtures: props.fixtures }) : null,
     sub === "players" ? React.createElement(AdminPlayers, { playersDb: props.playersDb, teams: props.teams }) : null,
-    sub === "entrants" ? React.createElement(AdminEntrants, { teams: props.teams }) : null,
+    sub === "entrants" ? React.createElement(AdminEntrants, { teams: props.teams, fixtures: props.fixtures }) : null,
     sub === "settings" ? React.createElement(AdminSettings, null) : null
   );
 }
@@ -2916,7 +2964,7 @@ function App() {
     players: ALL_PLAYERS, gwstats: gwstats, regInfo: regInfo,
     onSubmitted: function () { setRegInfo(null); setTab("myteam"); }
   });
-  else if (tab === "myteam") body = React.createElement(MyTeam, { teams: teams, config: config, gwstats: gwstats });
+  else if (tab === "myteam") body = React.createElement(MyTeam, { teams: teams, config: config, gwstats: gwstats, fixtures: fixtures });
   else if (tab === "table") body = React.createElement(LeagueTable, { teams: teams, results: results, gwstats: gwstats });
   else if (tab === "fixtures") body = React.createElement(Fixtures, { fixtures: fixtures, gwstats: gwstats });
   else if (tab === "scores") body = React.createElement(PlayersScoresTab, { gwstats: gwstats });
