@@ -43,7 +43,7 @@ function computeScore(stat, pos) {
   else if (pos === "FWD") pts += goals * 4;
 
   var gc = stat.goalsConceded || 0;
-  var cleanSheet = gc === 0;
+  var cleanSheet = gc === 0 && mins >= 60;
   if (pos === "GK" || pos === "DEF") {
     if (cleanSheet) pts += 4;
     pts -= Math.max(0, gc - 1);
@@ -93,7 +93,7 @@ function scoreBreakdown(stat, pos) {
   }
 
   var gc = stat.goalsConceded || 0;
-  var cleanSheet = gc === 0;
+  var cleanSheet = gc === 0 && mins >= 60;
   if (pos === "GK" || pos === "DEF") {
     if (cleanSheet) add("Clean sheet", 4);
     var conc = Math.max(0, gc - 1);
@@ -2164,7 +2164,7 @@ function AdminStats(props) {
       onChange: function (e) { setFilter(Object.assign({}, filter, { search: e.target.value })); },
       style: { width: "100%", padding: 8, borderRadius: 8, marginBottom: 10, background: "#1c3253", color: "#fff", border: "none" }
     }),
-    React.createElement("div", { style: { fontSize: 11, opacity: 0.7, marginBottom: 8 } }, "Showing " + filteredPlayers.length + " of " + ALL_PLAYERS.length + " players. Fields blur-save individually. \"cbit\" = combined clearances + blocks + interceptions + tackles (+ recoveries for MID/FWD) \u2014 needs 10 (GK/DEF) or 12 (MID/FWD) for the +2 bonus. \"saves\" is GK shot saves (every 3 = +1). Clean sheet is worked out automatically from goalsConceded \u2014 no separate tick needed."),
+    React.createElement("div", { style: { fontSize: 11, opacity: 0.7, marginBottom: 8 } }, "Showing " + filteredPlayers.length + " of " + ALL_PLAYERS.length + " players. Fields blur-save individually. \"cbit\" = combined clearances + blocks + interceptions + tackles (+ recoveries for MID/FWD) \u2014 needs 10 (GK/DEF) or 12 (MID/FWD) for the +2 bonus. \"saves\" is GK shot saves (every 3 = +1). Clean sheet is worked out automatically from goalsConceded and requires 60+ minutes played, mirroring FPL \u2014 no separate tick needed."),
     React.createElement("div", { style: { maxHeight: 420, overflowY: "auto" } }, rows)
   );
 }
