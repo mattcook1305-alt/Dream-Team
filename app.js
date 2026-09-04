@@ -1119,19 +1119,20 @@ function TeamBuilder(props) {
     });
     var pickerRows = eligible.map(function (p) {
       var check = eligibility(p);
+      var flagged = !check.ok || p.injured;
       return React.createElement("div", {
         key: p.id, onClick: function (pid) { return function () { addPlayer(pid); }; }(p.id),
         style: {
           display: "flex", justifyContent: "space-between", alignItems: "center",
           padding: "9px 10px", borderRadius: 8, marginBottom: 6,
-          background: check.ok ? "#1c3253" : "#3a1c1c",
-          border: check.ok ? "1px solid transparent" : "1px solid #e05555",
+          background: flagged ? "#3a1c1c" : "#1c3253",
+          border: flagged ? "1px solid #e05555" : "1px solid transparent",
           opacity: check.ok ? 1 : 0.75
         }
       },
         React.createElement("div", null,
-          React.createElement("div", { style: { fontWeight: 600, fontSize: 14, color: check.ok ? "#fff" : "#ff9a9a" } }, p.name),
-          React.createElement("div", { style: { fontSize: 11, opacity: 0.7 } }, p.club + (check.ok ? "" : " \u2014 " + check.reason))
+          React.createElement("div", { style: { fontWeight: 600, fontSize: 14, color: flagged ? "#ff9a9a" : "#fff" } }, (p.injured ? "\ud83d\udd34 " : "") + p.name),
+          React.createElement("div", { style: { fontSize: 11, opacity: 0.7 } }, p.club + (p.injured ? " \u2014 Injured" : "") + (check.ok ? "" : " \u2014 " + check.reason))
         ),
         React.createElement("div", { style: { textAlign: "right" } },
           React.createElement("div", { style: { fontWeight: 700, color: "#ffd23f" } }, fmtMoney(p.price)),
@@ -1185,9 +1186,9 @@ function TeamBuilder(props) {
           var pl = PLAYERS_BY_ID[filledIds[s]];
           slots.push(React.createElement("div", {
             key: pos + s, onClick: function (pid) { return function () { removePlayer(pid); }; }(filledIds[s]),
-            style: { background: "#274b8c", borderRadius: 10, padding: "8px 6px", textAlign: "center", flex: 1, minWidth: 78, margin: 3 }
+            style: { background: pl.injured ? "#5c2222" : "#274b8c", border: pl.injured ? "1px solid #ff5555" : "none", borderRadius: 10, padding: "8px 6px", textAlign: "center", flex: 1, minWidth: 78, margin: 3 }
           },
-            React.createElement("div", { style: { fontSize: 12, fontWeight: 700 } }, pl.name),
+            React.createElement("div", { style: { fontSize: 12, fontWeight: 700 } }, (pl.injured ? "\ud83d\udd34 " : "") + pl.name),
             React.createElement("div", { style: { fontSize: 10, opacity: 0.8 } }, pl.club),
             React.createElement("div", { style: { fontSize: 11, color: "#ffd23f", fontWeight: 700 } }, fmtMoney(pl.price)),
             React.createElement("div", { style: { fontSize: 10, opacity: 0.7, marginTop: 2 } }, "tap to remove")
@@ -1219,10 +1220,10 @@ function TeamBuilder(props) {
         var pl = PLAYERS_BY_ID[id];
         return React.createElement("div", {
           key: id, onClick: function (pid) { return function () { removePlayer(pid); }; }(id),
-          style: { display: "flex", justifyContent: "space-between", padding: "8px 10px", borderRadius: 8, marginBottom: 6, background: "#1c3253" }
+          style: { display: "flex", justifyContent: "space-between", padding: "8px 10px", borderRadius: 8, marginBottom: 6, background: pl.injured ? "#5c2222" : "#1c3253", border: pl.injured ? "1px solid #ff5555" : "none" }
         },
           React.createElement("div", null,
-            React.createElement("div", { style: { fontWeight: 600, fontSize: 14 } }, pl.name),
+            React.createElement("div", { style: { fontWeight: 600, fontSize: 14 } }, (pl.injured ? "\ud83d\udd34 " : "") + pl.name),
             React.createElement("div", { style: { fontSize: 11, opacity: 0.7 } }, pl.club)
           ),
           React.createElement("div", { style: { fontWeight: 700, color: "#ffd23f" } }, fmtMoney(pl.price))
@@ -1755,6 +1756,10 @@ function AdminPlayers(props) {
   var addMsg = addMsgArr[0];
   var setAddMsg = addMsgArr[1];
 
+  function toggleInjured(id, current) {
+    window.db.ref("players/" + id).update({ injured: !current });
+  }
+
   function deletePlayer(id, name) {
     var teamsObj = props.teams || {};
     var affected = Object.keys(teamsObj).filter(function (tid) {
@@ -1833,11 +1838,18 @@ function AdminPlayers(props) {
             ),
             React.createElement("div", { style: { fontSize: 10, opacity: 0.6, marginTop: 4 } }, "Changing club here is how you handle a real mid-season transfer \u2014 it updates this player everywhere they're already picked, unlike adding a new player entry.")
           )
-        : React.createElement("div", { style: { display: "flex", justifyContent: "space-between" } },
-            React.createElement("div", null, dbP.name + " (" + dbP.pos + ", " + dbP.club + ")"),
+        : React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+            React.createElement("div", null,
+              dbP.injured ? React.createElement("span", { style: { color: "#ff5555", fontWeight: 700, marginRight: 4 } }, "\ud83d\udd34") : null,
+              dbP.name + " (" + dbP.pos + ", " + dbP.club + ")"
+            ),
             React.createElement("div", null,
               fmtMoney(dbP.price) + "  ",
               React.createElement("button", { onClick: function (id, d) { return function () { setEditId(id); setEditVals({ name: d.name, price: String(d.price), club: d.club, pos: d.pos }); }; }(p.id, dbP) }, "Edit"),
+              React.createElement("button", {
+                onClick: function (id, cur) { return function () { toggleInjured(id, cur); }; }(p.id, !!dbP.injured),
+                style: { marginLeft: 6, color: dbP.injured ? "#6fcf6f" : "#ff9a9a" }
+              }, dbP.injured ? "Fit" : "Injured"),
               React.createElement("button", {
                 onClick: function (id, name) { return function () { deletePlayer(id, name); }; }(p.id, dbP.name),
                 style: { marginLeft: 6, color: "#ff9a9a" }
@@ -2601,11 +2613,11 @@ function MyTeam(props) {
     return React.createElement("div", {
       key: id,
       onClick: pts !== null ? function (pid, st, lbl) { return function () { openPlayerBreakdown(pid, st, lbl); }; }(id, latestStats[id], "GW" + maxSyncedGwNum) : undefined,
-      style: { display: "flex", justifyContent: "space-between", padding: "8px 10px", borderRadius: 8, marginBottom: 6, background: "#1c3253" }
+      style: { display: "flex", justifyContent: "space-between", padding: "8px 10px", borderRadius: 8, marginBottom: 6, background: pl.injured ? "#5c2222" : "#1c3253", border: pl.injured ? "1px solid #ff5555" : "none" }
     },
       React.createElement("div", null,
-        React.createElement("div", { style: { fontWeight: 600, fontSize: 14 } }, pl.name),
-        React.createElement("div", { style: { fontSize: 11, opacity: 0.7 } }, pl.pos + " \u00b7 " + pl.club)
+        React.createElement("div", { style: { fontWeight: 600, fontSize: 14 } }, (pl.injured ? "\ud83d\udd34 " : "") + pl.name),
+        React.createElement("div", { style: { fontSize: 11, opacity: 0.7 } }, pl.pos + " \u00b7 " + pl.club + (pl.injured ? " \u00b7 Injured" : ""))
       ),
       React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
         pts !== null ? React.createElement("div", { style: { background: "#274b8c", borderRadius: 8, padding: "4px 8px", color: "#ffd23f", fontWeight: 700, fontSize: 12 } }, pts + " pts") : null,
@@ -2623,9 +2635,9 @@ function MyTeam(props) {
       return React.createElement("div", {
         key: id,
         onClick: pts !== null ? function (pid, st, lbl) { return function () { openPlayerBreakdown(pid, st, lbl); }; }(id, latestStats[id], "GW" + maxSyncedGwNum) : undefined,
-        style: { background: "#274b8c", borderRadius: 10, padding: "8px 6px", textAlign: "center", flex: 1, minWidth: 78, margin: 3 }
+        style: { background: pl.injured ? "#5c2222" : "#274b8c", border: pl.injured ? "1px solid #ff5555" : "none", borderRadius: 10, padding: "8px 6px", textAlign: "center", flex: 1, minWidth: 78, margin: 3 }
       },
-        React.createElement("div", { style: { fontSize: 12, fontWeight: 700 } }, pl.name),
+        React.createElement("div", { style: { fontSize: 12, fontWeight: 700 } }, (pl.injured ? "\ud83d\udd34 " : "") + pl.name),
         React.createElement("div", { style: { fontSize: 10, opacity: 0.8 } }, pl.club),
         React.createElement("div", { style: { fontSize: 11, color: "#ffd23f", fontWeight: 700 } }, fmtMoney(pl.price)),
         pts !== null ? React.createElement("div", { style: { marginTop: 4, background: "#12233f", borderRadius: 6, padding: "2px 6px", color: "#ffd23f", fontWeight: 700, fontSize: 11 } }, pts + " pts") : null
@@ -2913,15 +2925,16 @@ function App() {
       if (!dbP || !dbP.name) continue;
       var existing = PLAYERS_BY_ID[id];
       if (existing) {
-        if (existing.price !== dbP.price || existing.club !== dbP.club || existing.pos !== dbP.pos || existing.name !== dbP.name) {
+        if (existing.price !== dbP.price || existing.club !== dbP.club || existing.pos !== dbP.pos || existing.name !== dbP.name || !!existing.injured !== !!dbP.injured) {
           existing.price = dbP.price;
           existing.club = dbP.club;
           existing.pos = dbP.pos;
           existing.name = dbP.name;
+          existing.injured = !!dbP.injured;
           changed = true;
         }
       } else {
-        var newP = { id: id, name: dbP.name, club: dbP.club, pos: dbP.pos, price: dbP.price };
+        var newP = { id: id, name: dbP.name, club: dbP.club, pos: dbP.pos, price: dbP.price, injured: !!dbP.injured };
         ALL_PLAYERS.push(newP);
         PLAYERS_BY_ID[id] = newP;
         if (ALL_CLUBS.indexOf(dbP.club) < 0) ALL_CLUBS.push(dbP.club);
