@@ -30,15 +30,14 @@ function computeScore(stat, pos) {
   pts -= (stat.penMissTaker || 0) * 2;
 
   var cbit = stat.cbit || 0;
-  if (pos === "GK" || pos === "DEF") {
+  if (pos === "DEF") {
     if (cbit >= 10) pts += 2;
   } else if (pos === "MID" || pos === "FWD") {
     if (cbit >= 12) pts += 2;
   }
 
   var goals = stat.goals || 0;
-  if (pos === "GK") pts += goals * 10;
-  else if (pos === "DEF") pts += goals * 6;
+  if (pos === "GK" || pos === "DEF") pts += goals * 6;
   else if (pos === "MID") pts += goals * 5;
   else if (pos === "FWD") pts += goals * 4;
 
@@ -46,7 +45,7 @@ function computeScore(stat, pos) {
   var cleanSheet = gc === 0 && mins >= 60;
   if (pos === "GK" || pos === "DEF") {
     if (cleanSheet) pts += 4;
-    pts -= Math.max(0, gc - 1);
+    pts -= Math.floor(gc / 2);
   } else if (pos === "MID") {
     if (cleanSheet) pts += 1;
   }
@@ -80,7 +79,7 @@ function scoreBreakdown(stat, pos) {
   if (stat.penMissTaker) add("Penalty missed/saved (\u00d7" + stat.penMissTaker + ")", -stat.penMissTaker * 2);
 
   var cbit = stat.cbit || 0;
-  if (pos === "GK" || pos === "DEF") {
+  if (pos === "DEF") {
     if (cbit >= 10) add("Defensive contribution (" + cbit + " CBIT)", 2);
   } else if (pos === "MID" || pos === "FWD") {
     if (cbit >= 12) add("Defensive contribution (" + cbit + " CBIRT)", 2);
@@ -88,7 +87,7 @@ function scoreBreakdown(stat, pos) {
 
   var goals = stat.goals || 0;
   if (goals) {
-    var perGoal = pos === "GK" ? 10 : pos === "DEF" ? 6 : pos === "MID" ? 5 : 4;
+    var perGoal = pos === "GK" ? 6 : pos === "DEF" ? 6 : pos === "MID" ? 5 : 4;
     add("Goals (\u00d7" + goals + ")", goals * perGoal);
   }
 
@@ -96,7 +95,7 @@ function scoreBreakdown(stat, pos) {
   var cleanSheet = gc === 0 && mins >= 60;
   if (pos === "GK" || pos === "DEF") {
     if (cleanSheet) add("Clean sheet", 4);
-    var conc = Math.max(0, gc - 1);
+    var conc = Math.floor(gc / 2);
     if (conc) add("Goals conceded (" + gc + ")", -conc);
   } else if (pos === "MID") {
     if (cleanSheet) add("Clean sheet", 1);
@@ -2021,6 +2020,19 @@ function AdminStats(props) {
     });
   }
 
+  function recomputeAllGameweeks() {
+    setSyncMsg("Recomputing all synced gameweeks...");
+    window.db.ref("gwstats").once("value").then(function (snap) {
+      var all = snap.val() || {};
+      var gwIds = Object.keys(all);
+      if (!gwIds.length) { setSyncMsg("No gameweeks have any stats yet."); return; }
+      var writes = gwIds.map(function (gwId) { return recomputeResultsForGw(gwId, all[gwId]); });
+      Promise.all(writes).then(function () {
+        setSyncMsg("Recomputed " + gwIds.length + " gameweek" + (gwIds.length === 1 ? "" : "s") + " using the current scoring rules.");
+      });
+    });
+  }
+
   function recomputeResultsForGw(gwId, statsForGw) {
     var gwNum = parseInt(gwId.replace("gw", ""), 10);
     var scores = {};
@@ -2150,8 +2162,11 @@ function AdminStats(props) {
   });
 
   return React.createElement(Card, null,
-    React.createElement(Btn, { onClick: syncEverything }, "\u21bb Sync fixtures + stats"),
-    React.createElement("div", { style: { fontSize: 11, opacity: 0.7, margin: "8px 0 14px" } }, "Pulls all season fixtures from football-data.org (free), then match stats from the official Fantasy Premier League API for every finished gameweek (goals, assists, cards, defensive contribution, and bonus points all included), then recalculates every team's scores. If a sync looks wrong or comes back empty, check the per-gameweek view below and top up by hand."),
+    React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
+      React.createElement(Btn, { onClick: syncEverything }, "\u21bb Sync fixtures + stats"),
+      React.createElement(Btn, { variant: "ghost", onClick: recomputeAllGameweeks }, "Recompute all gameweeks")
+    ),
+    React.createElement("div", { style: { fontSize: 11, opacity: 0.7, margin: "8px 0 14px" } }, "\"Sync fixtures + stats\" pulls all season fixtures from football-data.org (free), then match stats from the official Fantasy Premier League API for every finished gameweek (goals, assists, cards, defensive contribution, and bonus points all included) automatically \u2014 no need to look up which gameweek is current, it works it out from real match dates. \"Recompute all gameweeks\" re-scores every gameweek that already has stats stored, using whatever the current scoring rules are, without re-fetching anything \u2014 use this after a scoring rule change. If a sync looks wrong or comes back empty, check the per-gameweek view below and top up by hand."),
     React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 10, alignItems: "center", flexWrap: "wrap", borderTop: "1px solid #1c3253", paddingTop: 12 } },
       React.createElement("span", { style: { fontSize: 13 } }, "Gameweek"),
       React.createElement("input", { value: gw, onChange: function (e) { setGw(e.target.value); }, style: { width: 50, padding: 6, background: "#1c3253", color: "#fff", border: "none", borderRadius: 6 } }),
@@ -2176,7 +2191,7 @@ function AdminStats(props) {
       onChange: function (e) { setFilter(Object.assign({}, filter, { search: e.target.value })); },
       style: { width: "100%", padding: 8, borderRadius: 8, marginBottom: 10, background: "#1c3253", color: "#fff", border: "none" }
     }),
-    React.createElement("div", { style: { fontSize: 11, opacity: 0.7, marginBottom: 8 } }, "Showing " + filteredPlayers.length + " of " + ALL_PLAYERS.length + " players. Fields blur-save individually. \"cbit\" = combined clearances + blocks + interceptions + tackles (+ recoveries for MID/FWD) \u2014 needs 10 (GK/DEF) or 12 (MID/FWD) for the +2 bonus. \"saves\" is GK shot saves (every 3 = +1). Clean sheet is worked out automatically from goalsConceded and requires 60+ minutes played, mirroring FPL \u2014 no separate tick needed."),
+    React.createElement("div", { style: { fontSize: 11, opacity: 0.7, marginBottom: 8 } }, "Showing " + filteredPlayers.length + " of " + ALL_PLAYERS.length + " players. Fields blur-save individually. Scoring now mirrors official FPL rules exactly. \"cbit\" = combined clearances + blocks + interceptions + tackles (+ recoveries for MID/FWD) \u2014 needs 10 for DEF or 12 for MID/FWD for the +2 bonus (GK isn't eligible for this bonus). \"saves\" is GK shot saves (every 3 = +1). Goals conceded costs GK/DEF 1 point per every 2 conceded. Clean sheet is worked out automatically from goalsConceded and requires 60+ minutes played \u2014 no separate tick needed."),
     React.createElement("div", { style: { maxHeight: 420, overflowY: "auto" } }, rows)
   );
 }
