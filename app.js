@@ -491,6 +491,37 @@ function fetchFplStatsForGw(gwNum) {
   });
 }
 
+function fetchFplFixtures() {
+  return fetchFplBootstrap().then(function (bootstrap) {
+    return fetch("/.netlify/functions/fpl-proxy?action=fixtures")
+      .then(function (r) { return r.json(); })
+      .then(function (fixList) {
+        if (fixList && fixList.error) {
+          throw new Error("FPL proxy error: " + (typeof fixList.error === "string" ? fixList.error : JSON.stringify(fixList.error)));
+        }
+        var byGw = {};
+        for (var i = 0; i < fixList.length; i++) {
+          var f = fixList[i];
+          if (!f.event) continue;
+          var gwId = "gw" + f.event;
+          if (!byGw[gwId]) byGw[gwId] = { gw: f.event, label: "Gameweek " + f.event, matches: [] };
+          var homeName = fplClubNameToOurClub(bootstrap.teamNames[f.team_h] || ("Team " + f.team_h));
+          var awayName = fplClubNameToOurClub(bootstrap.teamNames[f.team_a] || ("Team " + f.team_a));
+          byGw[gwId].matches.push({
+            home: homeName,
+            away: awayName,
+            date: f.kickoff_time,
+            homeScore: f.team_h_score,
+            awayScore: f.team_a_score,
+            status: f.finished ? "FINISHED" : (f.started ? "IN_PLAY" : "SCHEDULED"),
+            fdMatchId: f.id
+          });
+        }
+        return byGw;
+      });
+  });
+}
+
 function mapApiStatsToUpdates(matches, apiDataByFixture) {
   var updates = {};
   var matchedCount = 0;
@@ -584,6 +615,14 @@ var CLUB_ALIASES = {
 
 function canonClub(normed) {
   return CLUB_ALIASES[normed] || normed;
+}
+
+function fplClubNameToOurClub(fplName) {
+  var canon = canonClub(normName(fplName));
+  for (var i = 0; i < ALL_CLUBS.length; i++) {
+    if (canonClub(normName(ALL_CLUBS[i])) === canon) return ALL_CLUBS[i];
+  }
+  return fplName;
 }
 
 function extractSurname(normed) {
@@ -1934,9 +1973,9 @@ function AdminFixtures(props) {
 
   function syncFixtures() {
     setSyncMsg("Fetching fixtures...");
-    fetchApiFixtures(apiCfg.competition, apiCfg.season).then(function (byGw) {
+    fetchFplFixtures().then(function (byGw) {
       var gwKeys = Object.keys(byGw);
-      if (!gwKeys.length) { setSyncMsg("No fixtures returned \u2014 check competition/season."); return; }
+      if (!gwKeys.length) { setSyncMsg("No fixtures returned from the FPL API."); return; }
       var writes = [];
       var totalMatches = 0;
       for (var i = 0; i < gwKeys.length; i++) {
@@ -1947,7 +1986,7 @@ function AdminFixtures(props) {
         setSyncMsg("Synced " + totalMatches + " fixtures across " + gwKeys.length + " gameweeks.");
       });
     }).catch(function (e) {
-      setSyncMsg("Sync failed: " + (e && e.message ? e.message : e) + " (check the football-proxy function is deployed)");
+      setSyncMsg("Sync failed: " + (e && e.message ? e.message : e) + " (check the fpl-proxy function is deployed)");
     });
   }
 
@@ -1960,11 +1999,7 @@ function AdminFixtures(props) {
   return React.createElement(React.Fragment, null,
     React.createElement(Card, null,
       React.createElement("div", { style: { fontWeight: 700, marginBottom: 8 } }, "Sync fixtures from API"),
-      React.createElement("div", { style: { display: "flex", gap: 6, marginBottom: 8 } },
-        React.createElement("input", { placeholder: "Competition code", value: apiCfg.competition, onChange: function (e) { setApiCfg(Object.assign({}, apiCfg, { competition: e.target.value })); }, style: { flex: 1, padding: 8, background: "#1c3253", color: "#fff", border: "none", borderRadius: 6 } }),
-        React.createElement("input", { placeholder: "Season", value: apiCfg.season, onChange: function (e) { setApiCfg(Object.assign({}, apiCfg, { season: e.target.value })); }, style: { flex: 1, padding: 8, background: "#1c3253", color: "#fff", border: "none", borderRadius: 6 } })
-      ),
-      React.createElement("div", { style: { fontSize: 11, opacity: 0.7, marginBottom: 8 } }, "Premier League's football-data.org competition code is PL. This runs automatically whenever this tab opens \u2014 use the button below only if you want to force a re-check."),
+      React.createElement("div", { style: { fontSize: 11, opacity: 0.7, marginBottom: 8 } }, "Fixtures now come from the official Fantasy Premier League API \u2014 the same source as match stats, so gameweek numbering can never disagree between the two. This runs automatically whenever this tab opens \u2014 use the button below only if you want to force a re-check."),
       syncMsg ? React.createElement("div", { style: { fontSize: 11, color: "#ffd23f", marginBottom: 8 } }, syncMsg) : null,
       React.createElement(Btn, { onClick: syncFixtures }, "Re-sync fixtures now")
     ),
@@ -2061,60 +2096,53 @@ function AdminStats(props) {
 
   function syncEverything() {
     setSyncMsg("Fetching fixtures...");
-    fetchApiFixtures("PL", "2026").then(function (byGw) {
+    fetchFplFixtures().then(function (byGw) {
       var gwKeys = Object.keys(byGw);
       if (!gwKeys.length) { setSyncMsg("No fixtures returned from the API."); return null; }
       var fixtureWrites = [];
       for (var i = 0; i < gwKeys.length; i++) fixtureWrites.push(window.db.ref("fixtures/" + gwKeys[i]).set(byGw[gwKeys[i]]));
       return Promise.all(fixtureWrites).then(function () {
-        var finishedGwNumsAll = [];
-        var fullyFinishedGwNums = {};
+        var nowMsVal = nowMs();
+        var highestStartedGw = 0;
         for (var gk = 0; gk < gwKeys.length; gk++) {
-          var matches = byGw[gwKeys[gk]].matches;
-          var finished = matches.filter(function (m) { return m.status === "FINISHED"; });
-          if (finished.length) finishedGwNumsAll.push(byGw[gwKeys[gk]].gw);
-          if (matches.length && finished.length === matches.length) fullyFinishedGwNums[byGw[gwKeys[gk]].gw] = true;
+          var gwEntry = byGw[gwKeys[gk]];
+          var anyStarted = (gwEntry.matches || []).some(function (m) { return m.date && new Date(m.date).getTime() <= nowMsVal; });
+          if (anyStarted && gwEntry.gw > highestStartedGw) highestStartedGw = gwEntry.gw;
         }
-        if (!finishedGwNumsAll.length) {
-          setSyncMsg("Fixtures synced (" + gwKeys.length + " gameweeks). No finished matches yet to pull stats for.");
+        if (!highestStartedGw) {
+          setSyncMsg("Fixtures synced (" + gwKeys.length + " gameweeks). No gameweek has started yet.");
           return null;
         }
-        return window.db.ref("results").once("value").then(function (snap) {
-          var already = snap.val() || {};
-          var finishedGwNums = finishedGwNumsAll.filter(function (n) { return !(fullyFinishedGwNums[n] && already["gw" + n]); });
-          if (!finishedGwNums.length) {
-            setSyncMsg("Fixtures synced (" + gwKeys.length + " gameweeks). All finished gameweeks are already synced \u2014 previous games left untouched. Use \"Sync stats for this GW only\" to force a re-check on a specific week.");
-            return null;
-          }
-          setSyncMsg("Fetching FPL stats for " + finishedGwNums.length + " finished gameweek(s)...");
-          var gwPromises = finishedGwNums.map(function (n) {
-            return fetchFplStatsForGw(n).then(function (mapped) {
-              return { gwId: "gw" + n, stats: mapped.updates, matched: mapped.matchedCount, unmatched: mapped.unmatchedNames.length };
-            }).catch(function (e) {
-              return { gwId: "gw" + n, stats: {}, matched: 0, unmatched: 0, error: "GW" + n + ": " + (e && e.message ? e.message : e) };
-            });
+        var targetGwNums = [];
+        for (var t = Math.max(1, highestStartedGw - 2); t <= highestStartedGw; t++) targetGwNums.push(t);
+        setSyncMsg("Fetching FPL stats for GW" + targetGwNums.join("/GW") + "...");
+        var gwPromises = targetGwNums.map(function (n) {
+          return fetchFplStatsForGw(n).then(function (mapped) {
+            return { gwId: "gw" + n, stats: mapped.updates, matched: mapped.matchedCount, unmatched: mapped.unmatchedNames.length };
+          }).catch(function (e) {
+            return { gwId: "gw" + n, stats: {}, matched: 0, unmatched: 0, error: "GW" + n + ": " + (e && e.message ? e.message : e) };
           });
-          return Promise.all(gwPromises).then(function (gwResults) {
-            var totalMatched = 0;
-            var totalUnmatched = 0;
-            var errors = [];
-            var statWrites = [];
-            for (var g = 0; g < gwResults.length; g++) {
-              totalMatched += gwResults[g].matched;
-              totalUnmatched += gwResults[g].unmatched;
-              if (gwResults[g].error) errors.push(gwResults[g].error);
-              for (var pid2 in gwResults[g].stats) {
-                statWrites.push(window.db.ref("gwstats/" + gwResults[g].gwId + "/" + pid2).update(gwResults[g].stats[pid2]));
-              }
+        });
+        return Promise.all(gwPromises).then(function (gwResults) {
+          var totalMatched = 0;
+          var totalUnmatched = 0;
+          var errors = [];
+          var statWrites = [];
+          for (var g = 0; g < gwResults.length; g++) {
+            totalMatched += gwResults[g].matched;
+            totalUnmatched += gwResults[g].unmatched;
+            if (gwResults[g].error) errors.push(gwResults[g].error);
+            for (var pid2 in gwResults[g].stats) {
+              statWrites.push(window.db.ref("gwstats/" + gwResults[g].gwId + "/" + pid2).update(gwResults[g].stats[pid2]));
             }
-            setSyncMsg("Saving scores...");
-            return Promise.all(statWrites).then(function () {
-              var resultWrites = gwResults.map(function (r) { return recomputeResultsForGw(r.gwId, r.stats); });
-              return Promise.all(resultWrites).then(function () {
-                var msg = "Done. " + gwKeys.length + " gameweeks of fixtures, stats pulled for " + finishedGwNums.length + " finished gameweek(s), " + totalMatched + " players matched (bonus points included)" + (totalUnmatched ? (", " + totalUnmatched + " unmatched (check per-gameweek view)") : "") + ".";
-                if (errors.length) msg += " Errors: " + errors.join(" | ");
-                setSyncMsg(msg);
-              });
+          }
+          setSyncMsg("Saving scores...");
+          return Promise.all(statWrites).then(function () {
+            var resultWrites = gwResults.map(function (r) { return recomputeResultsForGw(r.gwId, r.stats); });
+            return Promise.all(resultWrites).then(function () {
+              var msg = "Done. " + gwKeys.length + " gameweeks of fixtures synced. Stats refreshed for GW" + targetGwNums.join("/GW") + ", " + totalMatched + " players matched (bonus points included)" + (totalUnmatched ? (", " + totalUnmatched + " unmatched (check per-gameweek view)") : "") + ".";
+              if (errors.length) msg += " Errors: " + errors.join(" | ");
+              setSyncMsg(msg);
             });
           });
         });
@@ -2169,7 +2197,7 @@ function AdminStats(props) {
       React.createElement(Btn, { onClick: syncEverything }, "\u21bb Sync fixtures + stats"),
       React.createElement(Btn, { variant: "ghost", onClick: recomputeAllGameweeks }, "Recompute all gameweeks")
     ),
-    React.createElement("div", { style: { fontSize: 11, opacity: 0.7, margin: "8px 0 14px" } }, "\"Sync fixtures + stats\" pulls all season fixtures from football-data.org (free), then match stats from the official Fantasy Premier League API for every finished gameweek (goals, assists, cards, defensive contribution, and bonus points all included) automatically \u2014 no need to look up which gameweek is current, it works it out from real match dates. \"Recompute all gameweeks\" re-scores every gameweek that already has stats stored, using whatever the current scoring rules are, without re-fetching anything \u2014 use this after a scoring rule change. If a sync looks wrong or comes back empty, check the per-gameweek view below and top up by hand."),
+    React.createElement("div", { style: { fontSize: 11, opacity: 0.7, margin: "8px 0 14px" } }, "\"Sync fixtures + stats\" pulls all season fixtures, then refreshes match stats (goals, assists, cards, defensive contribution, bonus points) for the current gameweek plus the two before it, every time you tap it \u2014 no need to look up or type a gameweek number. Earlier gameweeks are assumed settled and left alone; use \"Sync stats for this GW only\" below to force a specific older week if one ever needs correcting. Fixtures and stats both come from the official FPL API, so gameweek numbering can't disagree between the two. \"Recompute all gameweeks\" re-scores everything already stored using the current scoring rules, without re-fetching anything \u2014 use this after a scoring rule change. If a sync looks wrong or comes back empty, check the per-gameweek view below and top up by hand."),
     React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 10, alignItems: "center", flexWrap: "wrap", borderTop: "1px solid #1c3253", paddingTop: 12 } },
       React.createElement("span", { style: { fontSize: 13 } }, "Gameweek"),
       React.createElement("input", { value: gw, onChange: function (e) { setGw(e.target.value); }, style: { width: 50, padding: 6, background: "#1c3253", color: "#fff", border: "none", borderRadius: 6 } }),
