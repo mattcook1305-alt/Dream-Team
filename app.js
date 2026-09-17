@@ -2068,9 +2068,12 @@ function AdminStats(props) {
       for (var i = 0; i < gwKeys.length; i++) fixtureWrites.push(window.db.ref("fixtures/" + gwKeys[i]).set(byGw[gwKeys[i]]));
       return Promise.all(fixtureWrites).then(function () {
         var finishedGwNumsAll = [];
+        var fullyFinishedGwNums = {};
         for (var gk = 0; gk < gwKeys.length; gk++) {
-          var finished = byGw[gwKeys[gk]].matches.filter(function (m) { return m.status === "FINISHED"; });
+          var matches = byGw[gwKeys[gk]].matches;
+          var finished = matches.filter(function (m) { return m.status === "FINISHED"; });
           if (finished.length) finishedGwNumsAll.push(byGw[gwKeys[gk]].gw);
+          if (matches.length && finished.length === matches.length) fullyFinishedGwNums[byGw[gwKeys[gk]].gw] = true;
         }
         if (!finishedGwNumsAll.length) {
           setSyncMsg("Fixtures synced (" + gwKeys.length + " gameweeks). No finished matches yet to pull stats for.");
@@ -2078,7 +2081,7 @@ function AdminStats(props) {
         }
         return window.db.ref("results").once("value").then(function (snap) {
           var already = snap.val() || {};
-          var finishedGwNums = finishedGwNumsAll.filter(function (n) { return !already["gw" + n]; });
+          var finishedGwNums = finishedGwNumsAll.filter(function (n) { return !(fullyFinishedGwNums[n] && already["gw" + n]); });
           if (!finishedGwNums.length) {
             setSyncMsg("Fixtures synced (" + gwKeys.length + " gameweeks). All finished gameweeks are already synced \u2014 previous games left untouched. Use \"Sync stats for this GW only\" to force a re-check on a specific week.");
             return null;
