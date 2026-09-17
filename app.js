@@ -1973,9 +1973,9 @@ function AdminFixtures(props) {
 
   function syncFixtures() {
     setSyncMsg("Fetching fixtures...");
-    fetchFplFixtures().then(function (byGw) {
+    fetchApiFixtures("PL", "2026").then(function (byGw) {
       var gwKeys = Object.keys(byGw);
-      if (!gwKeys.length) { setSyncMsg("No fixtures returned from the FPL API."); return; }
+      if (!gwKeys.length) { setSyncMsg("No fixtures returned \u2014 check the football-proxy function is deployed."); return; }
       var writes = [];
       var totalMatches = 0;
       for (var i = 0; i < gwKeys.length; i++) {
@@ -1999,7 +1999,7 @@ function AdminFixtures(props) {
   return React.createElement(React.Fragment, null,
     React.createElement(Card, null,
       React.createElement("div", { style: { fontWeight: 700, marginBottom: 8 } }, "Sync fixtures from API"),
-      React.createElement("div", { style: { fontSize: 11, opacity: 0.7, marginBottom: 8 } }, "Fixtures now come from the official Fantasy Premier League API \u2014 the same source as match stats, so gameweek numbering can never disagree between the two. This runs automatically whenever this tab opens \u2014 use the button below only if you want to force a re-check."),
+      React.createElement("div", { style: { fontSize: 11, opacity: 0.7, marginBottom: 8 } }, "Fixtures come from football-data.org (Premier League competition code PL). This runs automatically whenever this tab opens \u2014 use the button below only if you want to force a re-check."),
       syncMsg ? React.createElement("div", { style: { fontSize: 11, color: "#ffd23f", marginBottom: 8 } }, syncMsg) : null,
       React.createElement(Btn, { onClick: syncFixtures }, "Re-sync fixtures now")
     ),
@@ -2096,7 +2096,7 @@ function AdminStats(props) {
 
   function syncEverything() {
     setSyncMsg("Fetching fixtures...");
-    fetchFplFixtures().then(function (byGw) {
+    fetchApiFixtures("PL", "2026").then(function (byGw) {
       var gwKeys = Object.keys(byGw);
       if (!gwKeys.length) { setSyncMsg("No fixtures returned from the API."); return null; }
       var fixtureWrites = [];
@@ -2197,7 +2197,7 @@ function AdminStats(props) {
       React.createElement(Btn, { onClick: syncEverything }, "\u21bb Sync fixtures + stats"),
       React.createElement(Btn, { variant: "ghost", onClick: recomputeAllGameweeks }, "Recompute all gameweeks")
     ),
-    React.createElement("div", { style: { fontSize: 11, opacity: 0.7, margin: "8px 0 14px" } }, "\"Sync fixtures + stats\" pulls all season fixtures, then refreshes match stats (goals, assists, cards, defensive contribution, bonus points) for the current gameweek plus the two before it, every time you tap it \u2014 no need to look up or type a gameweek number. Earlier gameweeks are assumed settled and left alone; use \"Sync stats for this GW only\" below to force a specific older week if one ever needs correcting. Fixtures and stats both come from the official FPL API, so gameweek numbering can't disagree between the two. \"Recompute all gameweeks\" re-scores everything already stored using the current scoring rules, without re-fetching anything \u2014 use this after a scoring rule change. If a sync looks wrong or comes back empty, check the per-gameweek view below and top up by hand."),
+    React.createElement("div", { style: { fontSize: 11, opacity: 0.7, margin: "8px 0 14px" } }, "\"Sync fixtures + stats\" pulls all season fixtures from football-data.org, then refreshes match stats (goals, assists, cards, defensive contribution, bonus points) from the official FPL API for the current gameweek plus the two before it, every time you tap it \u2014 no need to look up or type a gameweek number. Earlier gameweeks are assumed settled and left alone; use \"Sync stats for this GW only\" below to force a specific older week if one ever needs correcting. \"Recompute all gameweeks\" re-scores everything already stored using the current scoring rules, without re-fetching anything \u2014 use this after a scoring rule change. If a sync looks wrong or comes back empty, check the per-gameweek view below and top up by hand."),
     React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 10, alignItems: "center", flexWrap: "wrap", borderTop: "1px solid #1c3253", paddingTop: 12 } },
       React.createElement("span", { style: { fontSize: 13 } }, "Gameweek"),
       React.createElement("input", { value: gw, onChange: function (e) { setGw(e.target.value); }, style: { width: 50, padding: 6, background: "#1c3253", color: "#fff", border: "none", borderRadius: 6 } }),
