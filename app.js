@@ -2238,7 +2238,7 @@ function AdminEntrants(props) {
   var editIdArr = React.useState(null);
   var editId = editIdArr[0];
   var setEditId = editIdArr[1];
-  var editValArr = React.useState({ teamName: "", entrantName: "" });
+  var editValArr = React.useState({ teamName: "", entrantName: "", pin: "" });
   var editVal = editValArr[0];
   var setEditVal = editValArr[1];
 
@@ -2254,14 +2254,15 @@ function AdminEntrants(props) {
 
   function startEdit(tid, t) {
     setEditId(tid);
-    setEditVal({ teamName: t.teamName || "", entrantName: t.entrantName || "" });
+    setEditVal({ teamName: t.teamName || "", entrantName: t.entrantName || "", pin: t.pin || "" });
   }
 
   function saveEdit(tid) {
-    if (!editVal.teamName.trim() || !editVal.entrantName.trim()) return;
+    if (!editVal.teamName.trim() || !editVal.entrantName.trim() || !editVal.pin.trim()) return;
     window.db.ref("teams/" + tid).update({
       teamName: editVal.teamName.trim(),
-      entrantName: editVal.entrantName.trim()
+      entrantName: editVal.entrantName.trim(),
+      pin: editVal.pin.trim()
     }).then(function () {
       setEditId(null);
     });
@@ -2383,6 +2384,11 @@ function AdminEntrants(props) {
           React.createElement("input", {
             placeholder: "Entrant name", value: editVal.entrantName,
             onChange: function (e) { setEditVal(Object.assign({}, editVal, { entrantName: e.target.value })); },
+            style: { width: "100%", padding: 8, borderRadius: 6, background: "#12233f", color: "#fff", border: "1px solid #3d5a8a", fontSize: 12, marginBottom: 6 }
+          }),
+          React.createElement("input", {
+            placeholder: "PIN", value: editVal.pin,
+            onChange: function (e) { setEditVal(Object.assign({}, editVal, { pin: e.target.value })); },
             style: { width: "100%", padding: 8, borderRadius: 6, background: "#12233f", color: "#fff", border: "1px solid #3d5a8a", fontSize: 12 }
           })
         )
