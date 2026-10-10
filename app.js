@@ -1698,7 +1698,7 @@ function PlayersScoresTab(props) {
     },
       React.createElement("div", null,
         React.createElement("div", { style: { fontWeight: 600, fontSize: 14 } }, p.name),
-        React.createElement("div", { style: { fontSize: 11, opacity: 0.7 } }, p.pos + " \u00b7 " + p.club)
+        React.createElement("div", { style: { fontSize: 11, opacity: 0.7 } }, p.pos + " \u00b7 " + p.club + " \u00b7 \u00a3" + Number(p.price).toFixed(1) + "m")
       ),
       React.createElement("div", { style: { textAlign: "right" } },
         React.createElement("div", { style: { fontWeight: 700, color: "#ffd23f" } }, tot + " pts"),
