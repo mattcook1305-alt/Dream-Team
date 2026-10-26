@@ -2074,6 +2074,14 @@ function AdminStats(props) {
   var syncMsgArr = React.useState("");
   var syncMsg = syncMsgArr[0];
   var setSyncMsg = syncMsgArr[1];
+  var advArr = React.useState(false);
+  var showAdv = advArr[0];
+  var setShowAdv = advArr[1];
+  var busyArr = React.useState(false);
+  var busy = busyArr[0];
+  var setBusy = busyArr[1];
+  var lastSyncArr = useDbValue("config/lastSync", 0);
+  var lastSync = lastSyncArr[0];
   var statsArr = useDbValue("gwstats/gw" + gw, {});
   var statsObj = statsArr[0];
   var teamIds = Object.keys(teamsObj || {});
@@ -2147,10 +2155,12 @@ function AdminStats(props) {
   }
 
   function syncEverything() {
+    if (busy) return;
+    setBusy(true);
     setSyncMsg("Fetching fixtures...");
     fetchApiFixtures("PL", "2026").then(function (byGw) {
       var gwKeys = Object.keys(byGw);
-      if (!gwKeys.length) { setSyncMsg("No fixtures returned from the API."); return null; }
+      if (!gwKeys.length) { setSyncMsg("No fixtures returned from the API."); setBusy(false); return null; }
       var fixtureWrites = [];
       for (var i = 0; i < gwKeys.length; i++) fixtureWrites.push(window.db.ref("fixtures/" + gwKeys[i]).set(byGw[gwKeys[i]]));
       return Promise.all(fixtureWrites).then(function () {
@@ -2163,10 +2173,25 @@ function AdminStats(props) {
         }
         if (!highestStartedGw) {
           setSyncMsg("Fixtures synced (" + gwKeys.length + " gameweeks). No gameweek has started yet.");
+          setBusy(false);
           return null;
         }
         var targetGwNums = [];
-        for (var t = Math.max(1, highestStartedGw - 1); t <= highestStartedGw; t++) targetGwNums.push(t);
+        var recentCutoff = nowMsVal - 10 * 24 * 3600 * 1000;
+        for (var t = 1; t <= highestStartedGw; t++) {
+          var gEntry = byGw["gw" + t];
+          var gMatches = (gEntry && gEntry.matches) || [];
+          var isRecent = t >= highestStartedGw - 1;
+          // older gameweeks are only refreshed if they still have unfinished matches that have kicked off,
+          // or a match played in the last 10 days (rearranged / postponed games)
+          var hasLoose = gMatches.some(function (m) {
+            if (!m.date) return false;
+            var d = new Date(m.date).getTime();
+            if (d > nowMsVal) return false;
+            return m.status !== "FINISHED" || d >= recentCutoff;
+          });
+          if (isRecent || hasLoose) targetGwNums.push(t);
+        }
         setSyncMsg("Fetching FPL stats for GW" + targetGwNums.join("/GW") + "...");
         var gwPromises = targetGwNums.map(function (n) {
           return fetchFplStatsForGw(n).then(function (mapped) {
@@ -2195,11 +2220,14 @@ function AdminStats(props) {
               var msg = "Done. " + gwKeys.length + " gameweeks of fixtures synced. Stats refreshed for GW" + targetGwNums.join("/GW") + ", " + totalMatched + " players matched (bonus points included)" + (totalUnmatched ? (", " + totalUnmatched + " unmatched (check per-gameweek view)") : "") + ".";
               if (errors.length) msg += " Errors: " + errors.join(" | ");
               setSyncMsg(msg);
+              setBusy(false);
+              window.db.ref("config/lastSync").set(nowMs());
             });
           });
         });
       });
     }).catch(function (e) {
+      setBusy(false);
       setSyncMsg("Sync failed: " + (e && e.message ? e.message : e));
     });
   }
@@ -2244,20 +2272,38 @@ function AdminStats(props) {
     );
   });
 
-  return React.createElement(Card, null,
-    React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
-      React.createElement(Btn, { onClick: syncEverything }, "\u21bb Sync fixtures + stats"),
-      React.createElement(Btn, { variant: "ghost", onClick: function () { recomputeAllGameweeks(true); } }, "Recompute latest 2 gameweeks"),
-      React.createElement(Btn, { variant: "ghost", onClick: function () { recomputeAllGameweeks(false); } }, "Repair: recompute ALL gameweeks")
+  var lastSyncText = lastSync ? new Date(lastSync).toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "not yet";
+  var mainCard = React.createElement(Card, null,
+    React.createElement("div", { style: { fontWeight: 800, fontSize: 16, marginBottom: 6 } }, "Update everything"),
+    React.createElement("div", { style: { fontSize: 12, opacity: 0.8, marginBottom: 12 } }, "One tap does it all: reloads the fixture list and dates, pulls every player's stats and bonus points from the official FPL data, works out each player's points using the FPL scoring rules, and updates every team in the correct gameweek. Run it whenever you like, as often as you like \u2014 for example after each day's matches."),
+    React.createElement("button", {
+      onClick: syncEverything, disabled: busy,
+      style: { width: "100%", padding: "16px 12px", borderRadius: 12, border: "none", background: busy ? "#8a7a2f" : "#ffd23f", color: "#12233f", fontSize: 17, fontWeight: 800 }
+    }, busy ? "Updating\u2026 please wait" : "\u21bb Update scores now"),
+    React.createElement("div", { style: { fontSize: 12, opacity: 0.7, marginTop: 8 } }, "Last updated: " + lastSyncText),
+    syncMsg ? React.createElement("div", { style: { fontSize: 12, color: "#ffd23f", marginTop: 8 } }, syncMsg) : null,
+    React.createElement("div", { style: { marginTop: 14 } },
+      React.createElement("button", {
+        onClick: function () { setShowAdv(!showAdv); },
+        style: { background: "transparent", border: "1px solid #3d5a8a", color: "#fff", borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 700 }
+      }, showAdv ? "Hide advanced tools \u25b2" : "Advanced tools (rarely needed) \u25bc")
+    )
+  );
+  if (!showAdv) return mainCard;
+
+  return React.createElement(React.Fragment, null, mainCard, React.createElement(Card, null,
+    React.createElement("div", { style: { fontWeight: 700, marginBottom: 6 } }, "Advanced tools"),
+    React.createElement("div", { style: { fontSize: 11, opacity: 0.7, marginBottom: 10 } }, "The button above refreshes the current gameweek, the one before it, and any older gameweek with a rearranged or recent match. These tools are only for fixing problems."),
+    React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 } },
+      React.createElement(Btn, { variant: "ghost", onClick: function () { recomputeAllGameweeks(true); } }, "Re-score latest 2 gameweeks"),
+      React.createElement(Btn, { variant: "ghost", onClick: function () { recomputeAllGameweeks(false); } }, "Re-score ALL gameweeks")
     ),
-    React.createElement("div", { style: { fontSize: 11, opacity: 0.7, margin: "8px 0 14px" } }, "\"Sync fixtures + stats\" pulls all season fixtures from football-data.org, then refreshes match stats (goals, assists, cards, defensive contribution, bonus points) from the official FPL API for the current gameweek and the one before it, every time you tap it \u2014 no need to type a gameweek number. Earlier gameweeks are left exactly as they were. \"Recompute latest 2 gameweeks\" re-scores the two most recent gameweeks using the current scoring rules, without re-fetching anything \u2014 use this after a scoring rule change. If a sync looks wrong or comes back empty, check the per-gameweek view below and top up by hand."),
     React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 10, alignItems: "center", flexWrap: "wrap", borderTop: "1px solid #1c3253", paddingTop: 12 } },
-      React.createElement("span", { style: { fontSize: 13 } }, "Gameweek"),
+      React.createElement("span", { style: { fontSize: 13 } }, "Single gameweek"),
       React.createElement("input", { value: gw, onChange: function (e) { setGw(e.target.value); }, style: { width: 50, padding: 6, background: "#1c3253", color: "#fff", border: "none", borderRadius: 6 } }),
-      React.createElement(Btn, { variant: "ghost", onClick: syncStatsFromApi }, "Sync stats for this GW only"),
-      React.createElement(Btn, { variant: "ghost", onClick: computeAndSave }, "Recompute this GW only")
+      React.createElement(Btn, { variant: "ghost", onClick: syncStatsFromApi }, "Pull stats for this GW"),
+      React.createElement(Btn, { variant: "ghost", onClick: computeAndSave }, "Re-score this GW")
     ),
-    syncMsg ? React.createElement("div", { style: { fontSize: 11, color: "#ffd23f", marginBottom: 8 } }, syncMsg) : null,
     React.createElement("div", { style: { display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" } },
       ["ALL", "GK", "DEF", "MID", "FWD"].map(function (p) {
         return React.createElement("button", {
@@ -2277,7 +2323,7 @@ function AdminStats(props) {
     }),
     React.createElement("div", { style: { fontSize: 11, opacity: 0.7, marginBottom: 8 } }, "Showing " + filteredPlayers.length + " of " + ALL_PLAYERS.length + " players. Fields blur-save individually. Scoring now mirrors official FPL rules exactly. \"cbit\" = combined clearances + blocks + interceptions + tackles (+ recoveries for MID/FWD) \u2014 needs 10 for DEF or 12 for MID/FWD for the +2 bonus (GK isn't eligible for this bonus). \"saves\" is GK shot saves (every 3 = +1). Goals conceded costs GK/DEF 1 point per every 2 conceded. Clean sheet is worked out automatically from goalsConceded and requires 60+ minutes played \u2014 no separate tick needed."),
     React.createElement("div", { style: { maxHeight: 420, overflowY: "auto" } }, rows)
-  );
+  ));
 }
 
 function AdminEntrants(props) {
@@ -2614,7 +2660,7 @@ function AdminEntrants(props) {
         React.createElement(Btn, { variant: "ghost", onClick: exportSeasonGrid }, "\u2b07\ufe0f Season grid")
       )
     ),
-    React.createElement("div", { style: { fontSize: 11, opacity: 0.7, marginBottom: 8 } }, "Emergency transfers apply automatically once their effective gameweek arrives \u2014 no action needed here. Scores recalculate automatically whenever fixtures/stats are synced from Admin > Stats entry."),
+    React.createElement("div", { style: { fontSize: 11, opacity: 0.7, marginBottom: 8 } }, "Emergency transfers apply automatically once their effective gameweek arrives \u2014 no action needed here. Scores recalculate automatically whenever fixtures/stats are updated from Admin > Update scores."),
     syncMsg ? React.createElement("div", { style: { fontSize: 11, color: "#ffd23f", marginBottom: 8 } }, syncMsg) : null,
     rows
   );
@@ -3028,7 +3074,7 @@ function AdminTab(props) {
   var sub = subArr[0];
   var setSub = subArr[1];
   var subs = [
-    { key: "stats", label: "Stats entry" },
+    { key: "stats", label: "Update scores" },
     { key: "fixtures", label: "Fixtures" },
     { key: "players", label: "Players" },
     { key: "entrants", label: "Entrants" },
