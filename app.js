@@ -231,8 +231,35 @@ function dtClearAdmin() {
   try { window.localStorage.removeItem("dt_admin_ok"); } catch (e) { }
 }
 
+function legacyEntryGw(e) {
+  // Old transfer-log entries (made before effective gameweeks were recorded): best guess =
+  // the latest gameweek that had already kicked off when the transfer was applied.
+  if (e.effectiveGw) return e.effectiveGw;
+  var fx = window.dtFixtures || {};
+  var ts = e.timestamp || 0;
+  var best = 0;
+  var keys = Object.keys(fx);
+  for (var i = 0; i < keys.length; i++) {
+    var g = fx[keys[i]];
+    if (!g || !g.gw) continue;
+    var started = (g.matches || []).some(function (m) { return m.date && new Date(m.date).getTime() <= ts; });
+    if (started && g.gw > best) best = g.gw;
+  }
+  return best || 1;
+}
+
 function effectiveSquad(team, gwNum) {
   var ids = (team.playerIds || []).slice();
+  var tlog = team.transferLog || [];
+  for (var li = tlog.length - 1; li >= 0; li--) {
+    var le = tlog[li];
+    if (!le || !le.inId || !le.outId) continue;
+    var effG = le.type === "emergency" || le.type === "window" ? legacyEntryGw(le) : 0;
+    if (effG && effG > gwNum) {
+      var ix = ids.indexOf(le.inId);
+      if (ix >= 0) ids[ix] = le.outId;
+    }
+  }
   var pend = team.pendingEmergency;
   if (pend && gwNum >= pend.effectiveGw) {
     var idx = ids.indexOf(pend.outId);
@@ -1069,6 +1096,7 @@ function TeamBuilder(props) {
           outId: outIdX, inId: inIds[i],
           outName: (PLAYERS_BY_ID[outIdX] || {}).name || "",
           inName: (PLAYERS_BY_ID[inIds[i]] || {}).name || "",
+          effectiveGw: props.windowEffectiveGw || 0,
           timestamp: nowMs()
         };
       });
@@ -1394,7 +1422,9 @@ function LeagueTable(props) {
       if (gwSel === "overall") {
         pts = 0;
         for (var sgi = 0; sgi < allSyncedGwIds.length; sgi++) {
-          pts += computeScore(gwstatsObj[allSyncedGwIds[sgi]][pid], pl.pos);
+          var sgNum = parseInt(allSyncedGwIds[sgi].replace("gw", ""), 10);
+          if (effectiveSquad(team, sgNum).indexOf(pid) < 0) continue;
+          pts += computeScore((gwstatsObj[allSyncedGwIds[sgi]] || {})[pid], pl.pos);
         }
         clickable = false;
       } else {
@@ -2059,11 +2089,12 @@ function AdminStats(props) {
     });
   }
 
-  function recomputeAllGameweeks() {
-    setSyncMsg("Recomputing all synced gameweeks...");
+  function recomputeAllGameweeks(onlyLatest) {
+    setSyncMsg(onlyLatest === true ? "Recomputing the latest two gameweeks..." : "Recomputing every gameweek...");
     window.db.ref("gwstats").once("value").then(function (snap) {
       var all = snap.val() || {};
-      var gwIds = Object.keys(all);
+      var gwIds = Object.keys(all).sort(function (a, b) { return parseInt(a.replace("gw", ""), 10) - parseInt(b.replace("gw", ""), 10); });
+      if (onlyLatest === true) gwIds = gwIds.slice(-2);
       if (!gwIds.length) { setSyncMsg("No gameweeks have any stats yet."); return; }
       var writes = gwIds.map(function (gwId) { return recomputeResultsForGw(gwId, all[gwId]); });
       Promise.all(writes).then(function () {
@@ -2118,8 +2149,8 @@ function AdminStats(props) {
           return null;
         }
         var targetGwNums = [];
-        for (var t = 1; t <= highestStartedGw; t++) targetGwNums.push(t);
-        setSyncMsg("Fetching FPL stats for GW1 to GW" + highestStartedGw + "...");
+        for (var t = Math.max(1, highestStartedGw - 1); t <= highestStartedGw; t++) targetGwNums.push(t);
+        setSyncMsg("Fetching FPL stats for GW" + targetGwNums.join("/GW") + "...");
         var gwPromises = targetGwNums.map(function (n) {
           return fetchFplStatsForGw(n).then(function (mapped) {
             return { gwId: "gw" + n, stats: mapped.updates, matched: mapped.matchedCount, unmatched: mapped.unmatchedNames.length };
@@ -2144,7 +2175,7 @@ function AdminStats(props) {
           return Promise.all(statWrites).then(function () {
             var resultWrites = gwResults.map(function (r) { return recomputeResultsForGw(r.gwId, r.stats); });
             return Promise.all(resultWrites).then(function () {
-              var msg = "Done. " + gwKeys.length + " gameweeks of fixtures synced. Stats refreshed for GW1 to GW" + highestStartedGw + ", " + totalMatched + " players matched (bonus points included)" + (totalUnmatched ? (", " + totalUnmatched + " unmatched (check per-gameweek view)") : "") + ".";
+              var msg = "Done. " + gwKeys.length + " gameweeks of fixtures synced. Stats refreshed for GW" + targetGwNums.join("/GW") + ", " + totalMatched + " players matched (bonus points included)" + (totalUnmatched ? (", " + totalUnmatched + " unmatched (check per-gameweek view)") : "") + ".";
               if (errors.length) msg += " Errors: " + errors.join(" | ");
               setSyncMsg(msg);
             });
@@ -2199,9 +2230,10 @@ function AdminStats(props) {
   return React.createElement(Card, null,
     React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
       React.createElement(Btn, { onClick: syncEverything }, "\u21bb Sync fixtures + stats"),
-      React.createElement(Btn, { variant: "ghost", onClick: recomputeAllGameweeks }, "Recompute all gameweeks")
+      React.createElement(Btn, { variant: "ghost", onClick: function () { recomputeAllGameweeks(true); } }, "Recompute latest 2 gameweeks"),
+      React.createElement(Btn, { variant: "ghost", onClick: function () { recomputeAllGameweeks(false); } }, "Repair: recompute ALL gameweeks")
     ),
-    React.createElement("div", { style: { fontSize: 11, opacity: 0.7, margin: "8px 0 14px" } }, "\"Sync fixtures + stats\" pulls all season fixtures from football-data.org, then refreshes match stats (goals, assists, cards, defensive contribution, bonus points) from the official FPL API for every gameweek that has started (all of them, re-scored each time) \u2014 no need to look up or type a gameweek number. The single-gameweek tools below are only for manual corrections. \"Recompute all gameweeks\" re-scores everything already stored using the current scoring rules, without re-fetching anything \u2014 use this after a scoring rule change. If a sync looks wrong or comes back empty, check the per-gameweek view below and top up by hand."),
+    React.createElement("div", { style: { fontSize: 11, opacity: 0.7, margin: "8px 0 14px" } }, "\"Sync fixtures + stats\" pulls all season fixtures from football-data.org, then refreshes match stats (goals, assists, cards, defensive contribution, bonus points) from the official FPL API for the current gameweek and the one before it, every time you tap it \u2014 no need to type a gameweek number. Earlier gameweeks are left exactly as they were. \"Recompute latest 2 gameweeks\" re-scores the two most recent gameweeks using the current scoring rules, without re-fetching anything \u2014 use this after a scoring rule change. If a sync looks wrong or comes back empty, check the per-gameweek view below and top up by hand."),
     React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 10, alignItems: "center", flexWrap: "wrap", borderTop: "1px solid #1c3253", paddingTop: 12 } },
       React.createElement("span", { style: { fontSize: 13 } }, "Gameweek"),
       React.createElement("input", { value: gw, onChange: function (e) { setGw(e.target.value); }, style: { width: 50, padding: 6, background: "#1c3253", color: "#fff", border: "none", borderRadius: 6 } }),
@@ -2362,6 +2394,26 @@ function AdminEntrants(props) {
         style: { padding: "4px 8px", borderRadius: 6, border: "none", background: "#1c3253", color: "#ffd23f", fontSize: 11, fontWeight: 700 }
       }, "Fix")
     ) : null;
+    var appliedFix = (t.transferLog || []).map(function (le, lix) {
+      if (!le || le.type === undefined) return null;
+      var effNow = legacyEntryGw(le);
+      return React.createElement("div", { key: "tl" + lix, style: { display: "flex", alignItems: "center", gap: 6, marginTop: 4, flexWrap: "wrap" } },
+        React.createElement("span", { style: { fontSize: 11, opacity: 0.8 } }, (le.type === "emergency" ? "Emergency" : "Window") + ": " + (le.outName || "?") + " \u2192 " + (le.inName || "?") + " \u00b7 counts from GW"),
+        React.createElement("input", {
+          type: "number", defaultValue: effNow, id: "tlgw-" + tid + "-" + lix,
+          style: { width: 50, padding: 4, borderRadius: 6, background: "#12233f", color: "#fff", border: "1px solid #3d5a8a", fontSize: 12 }
+        }),
+        React.createElement("button", {
+          onClick: function (id, ix) { return function () {
+            var el = document.getElementById("tlgw-" + id + "-" + ix);
+            var n = el ? parseInt(el.value, 10) : NaN;
+            if (isNaN(n) || n < 1) return;
+            window.db.ref("teams/" + id + "/transferLog/" + ix + "/effectiveGw").set(n);
+          }; }(tid, lix),
+          style: { padding: "4px 8px", borderRadius: 6, border: "none", background: "#1c3253", color: "#ffd23f", fontSize: 11, fontWeight: 700 }
+        }, "Fix")
+      );
+    });
     var payButtons = [
       { key: "a", label: "\u00a340" },
       { key: "b", label: "\u00a320" },
@@ -2426,6 +2478,7 @@ function AdminEntrants(props) {
         "Paid \u00a3" + totalPaid + " of \u00a380 \u00b7 transfers logged: ", (t.transferLog || []).length, " \u00b7 emergency: ", emStatus
       ),
       emergencyFix,
+      appliedFix,
       React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6, marginTop: 6 } },
         React.createElement("span", { style: { fontSize: 11, opacity: 0.8 } }, "\ud83c\udfc6 Sweepstake team:"),
         React.createElement("select", {
@@ -2529,7 +2582,7 @@ function MyTeam(props) {
     var idx = ids.indexOf(pend.outId);
     if (idx < 0) return;
     var newIds = ids.slice(0, idx).concat([pend.inId]).concat(ids.slice(idx + 1));
-    var entry = { type: "emergency", outId: pend.outId, inId: pend.inId, outName: pend.outName, inName: pend.inName, timestamp: nowMs() };
+    var entry = { type: "emergency", outId: pend.outId, inId: pend.inId, outName: pend.outName, inName: pend.inName, effectiveGw: pend.effectiveGw, timestamp: nowMs() };
     window.db.ref("teams/" + foundId).update({
       playerIds: newIds,
       formation: pend.newFormation || t.formation,
@@ -2631,6 +2684,7 @@ function MyTeam(props) {
       mode: "transfer", transferKind: "window",
       teamId: foundId, initialSelected: team.playerIds || [],
       windowIndex: winIdx, maxChanges: windowTransfersLeft, transferLog: team.transferLog || [],
+      windowEffectiveGw: nextUnstartedGw(props.fixtures, Math.max(now, new Date(((windows[winIdx] || {}).activeFrom || "2000-01-01") + "T00:00:00").getTime()), currentGw + 1),
       onSaved: function () { setTransferMode(null); setMsg("Transfer(s) saved."); },
       onCancel: function () { setTransferMode(null); }
     });
@@ -2665,7 +2719,7 @@ function MyTeam(props) {
   var squadRows = sortIdsByPos(team.playerIds || []).map(function (id) {
     var pl = PLAYERS_BY_ID[id];
     if (!pl) return null;
-    var pts = maxSyncedGwId ? computeScore(latestStats[id], pl.pos) : null;
+    var pts = maxSyncedGwId ? (effIdsForWeek.indexOf(id) >= 0 ? computeScore(latestStats[id], pl.pos) : 0) : null;
     return React.createElement("div", {
       key: id,
       onClick: pts !== null ? function (pid, st, lbl) { return function () { openPlayerBreakdown(pid, st, lbl); }; }(id, latestStats[id], "GW" + maxSyncedGwNum) : undefined,
@@ -2687,7 +2741,7 @@ function MyTeam(props) {
     var chips = groupedSquad[pos].map(function (id) {
       var pl = PLAYERS_BY_ID[id];
       if (!pl) return null;
-      var pts = maxSyncedGwId ? computeScore(latestStats[id], pl.pos) : null;
+      var pts = maxSyncedGwId ? (effIdsForWeek.indexOf(id) >= 0 ? computeScore(latestStats[id], pl.pos) : 0) : null;
       return React.createElement("div", {
         key: id,
         onClick: pts !== null ? function (pid, st, lbl) { return function () { openPlayerBreakdown(pid, st, lbl); }; }(id, latestStats[id], "GW" + maxSyncedGwNum) : undefined,
@@ -2946,6 +3000,7 @@ function App() {
   var teams = teamsArr[0];
   var fixturesArr = useDbValue("fixtures", {});
   var fixtures = fixturesArr[0];
+  window.dtFixtures = fixtures;
   var resultsArr = useDbValue("results", {});
   var results = resultsArr[0];
   var playersDbArr = useDbValue("players", {});
