@@ -30,10 +30,11 @@ function computeScore(stat, pos) {
   pts -= (stat.penMissTaker || 0) * 2;
 
   var cbit = stat.cbit || 0;
+  var cbirt = (stat.cbirt !== undefined && stat.cbirt !== null) ? stat.cbirt : cbit;
   if (pos === "DEF") {
     if (cbit >= 10) pts += 2;
   } else if (pos === "MID" || pos === "FWD") {
-    if (cbit >= 12) pts += 2;
+    if (cbirt >= 12) pts += 2;
   }
 
   var goals = stat.goals || 0;
@@ -79,10 +80,11 @@ function scoreBreakdown(stat, pos) {
   if (stat.penMissTaker) add("Penalty missed/saved (\u00d7" + stat.penMissTaker + ")", -stat.penMissTaker * 2);
 
   var cbit = stat.cbit || 0;
+  var cbirt = (stat.cbirt !== undefined && stat.cbirt !== null) ? stat.cbirt : cbit;
   if (pos === "DEF") {
     if (cbit >= 10) add("Defensive contribution (" + cbit + " CBIT)", 2);
   } else if (pos === "MID" || pos === "FWD") {
-    if (cbit >= 12) add("Defensive contribution (" + cbit + " CBIRT)", 2);
+    if (cbirt >= 12) add("Defensive contribution (" + cbirt + " CBIRT)", 2);
   }
 
   var goals = stat.goals || 0;
@@ -459,7 +461,8 @@ function mapFplLiveToUpdates(liveData, bootstrap) {
     var localP = findLocalPlayerMatch(meta.web_name, clubName) || findLocalPlayerMatch(meta.first_name + " " + meta.second_name, clubName);
     if (!localP) { unmatchedNames.push(meta.web_name + " (" + clubName + ")"); continue; }
     matchedCount++;
-    var cbit = (stat.clearances_blocks_interceptions || 0) + (stat.tackles || 0) + (stat.recoveries || 0);
+    var cbit = (stat.clearances_blocks_interceptions || 0) + (stat.tackles || 0);
+    var cbirt = cbit + (stat.recoveries || 0);
     updates[localP.id] = {
       mins: stat.minutes || 0,
       goals: stat.goals_scored || 0,
@@ -472,6 +475,7 @@ function mapFplLiveToUpdates(liveData, bootstrap) {
       penSaveGK: stat.penalties_saved || 0,
       penMissTaker: stat.penalties_missed || 0,
       cbit: cbit,
+      cbirt: cbirt,
       bonus: stat.bonus || 0
     };
   }
@@ -2114,8 +2118,8 @@ function AdminStats(props) {
           return null;
         }
         var targetGwNums = [];
-        for (var t = Math.max(1, highestStartedGw - 2); t <= highestStartedGw; t++) targetGwNums.push(t);
-        setSyncMsg("Fetching FPL stats for GW" + targetGwNums.join("/GW") + "...");
+        for (var t = 1; t <= highestStartedGw; t++) targetGwNums.push(t);
+        setSyncMsg("Fetching FPL stats for GW1 to GW" + highestStartedGw + "...");
         var gwPromises = targetGwNums.map(function (n) {
           return fetchFplStatsForGw(n).then(function (mapped) {
             return { gwId: "gw" + n, stats: mapped.updates, matched: mapped.matchedCount, unmatched: mapped.unmatchedNames.length };
@@ -2140,7 +2144,7 @@ function AdminStats(props) {
           return Promise.all(statWrites).then(function () {
             var resultWrites = gwResults.map(function (r) { return recomputeResultsForGw(r.gwId, r.stats); });
             return Promise.all(resultWrites).then(function () {
-              var msg = "Done. " + gwKeys.length + " gameweeks of fixtures synced. Stats refreshed for GW" + targetGwNums.join("/GW") + ", " + totalMatched + " players matched (bonus points included)" + (totalUnmatched ? (", " + totalUnmatched + " unmatched (check per-gameweek view)") : "") + ".";
+              var msg = "Done. " + gwKeys.length + " gameweeks of fixtures synced. Stats refreshed for GW1 to GW" + highestStartedGw + ", " + totalMatched + " players matched (bonus points included)" + (totalUnmatched ? (", " + totalUnmatched + " unmatched (check per-gameweek view)") : "") + ".";
               if (errors.length) msg += " Errors: " + errors.join(" | ");
               setSyncMsg(msg);
             });
@@ -2197,7 +2201,7 @@ function AdminStats(props) {
       React.createElement(Btn, { onClick: syncEverything }, "\u21bb Sync fixtures + stats"),
       React.createElement(Btn, { variant: "ghost", onClick: recomputeAllGameweeks }, "Recompute all gameweeks")
     ),
-    React.createElement("div", { style: { fontSize: 11, opacity: 0.7, margin: "8px 0 14px" } }, "\"Sync fixtures + stats\" pulls all season fixtures from football-data.org, then refreshes match stats (goals, assists, cards, defensive contribution, bonus points) from the official FPL API for the current gameweek plus the two before it, every time you tap it \u2014 no need to look up or type a gameweek number. Earlier gameweeks are assumed settled and left alone; use \"Sync stats for this GW only\" below to force a specific older week if one ever needs correcting. \"Recompute all gameweeks\" re-scores everything already stored using the current scoring rules, without re-fetching anything \u2014 use this after a scoring rule change. If a sync looks wrong or comes back empty, check the per-gameweek view below and top up by hand."),
+    React.createElement("div", { style: { fontSize: 11, opacity: 0.7, margin: "8px 0 14px" } }, "\"Sync fixtures + stats\" pulls all season fixtures from football-data.org, then refreshes match stats (goals, assists, cards, defensive contribution, bonus points) from the official FPL API for every gameweek that has started (all of them, re-scored each time) \u2014 no need to look up or type a gameweek number. The single-gameweek tools below are only for manual corrections. \"Recompute all gameweeks\" re-scores everything already stored using the current scoring rules, without re-fetching anything \u2014 use this after a scoring rule change. If a sync looks wrong or comes back empty, check the per-gameweek view below and top up by hand."),
     React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 10, alignItems: "center", flexWrap: "wrap", borderTop: "1px solid #1c3253", paddingTop: 12 } },
       React.createElement("span", { style: { fontSize: 13 } }, "Gameweek"),
       React.createElement("input", { value: gw, onChange: function (e) { setGw(e.target.value); }, style: { width: 50, padding: 6, background: "#1c3253", color: "#fff", border: "none", borderRadius: 6 } }),
