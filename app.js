@@ -1415,7 +1415,24 @@ function LeagueTable(props) {
       body = playerRows;
     }
     var allSyncedGwIds = Object.keys(gwstatsObj);
-    var squadRowsDetail = sortIdsByPos(team.playerIds || []).map(function (pid) {
+    var detailIds;
+    if (gwSel === "overall") {
+      detailIds = (team.playerIds || []).slice();
+      for (var dgi = 0; dgi < allSyncedGwIds.length; dgi++) {
+        var dgNum = parseInt(allSyncedGwIds[dgi].replace("gw", ""), 10);
+        var dEff = effectiveSquad(team, dgNum);
+        for (var dei = 0; dei < dEff.length; dei++) { if (detailIds.indexOf(dEff[dei]) < 0) detailIds.push(dEff[dei]); }
+      }
+    } else {
+      detailIds = effectiveSquad(team, parseInt(gwSel, 10));
+    }
+    var detailFormation = team.formation;
+    if (gwSel !== "overall") {
+      var dfc = { DEF: 0, MID: 0, FWD: 0 };
+      detailIds.forEach(function (x) { var pp = PLAYERS_BY_ID[x]; if (pp && dfc[pp.pos] !== undefined) dfc[pp.pos]++; });
+      detailFormation = dfc.DEF + "-" + dfc.MID + "-" + dfc.FWD;
+    }
+    var squadRowsDetail = sortIdsByPos(detailIds).map(function (pid) {
       var pl = PLAYERS_BY_ID[pid];
       if (!pl) return null;
       var pts, clickStat, clickLabel, clickable;
@@ -1450,7 +1467,7 @@ function LeagueTable(props) {
       React.createElement(Header, { sub: team.teamName }),
       React.createElement(Card, null,
         React.createElement(Btn, { variant: "ghost", onClick: function () { setDetailTeam(null); } }, "\u2190 Back to table"),
-        React.createElement("div", { style: { marginTop: 10, fontSize: 13 } }, team.entrantName + " \u00b7 " + team.formation + " \u00b7 " + fmtMoney(team.cost || 0)),
+        React.createElement("div", { style: { marginTop: 10, fontSize: 13 } }, team.entrantName + " \u00b7 " + detailFormation + " \u00b7 " + fmtMoney(team.cost || 0)),
         team.sweepstakeClub ? React.createElement("div", { style: { fontSize: 12, color: "#ffd23f", marginTop: 4 } }, "\ud83c\udfc6 Sweepstake team: " + team.sweepstakeClub) : null
       ),
       React.createElement(Card, null,
@@ -1458,10 +1475,10 @@ function LeagueTable(props) {
         gwSel === "overall" ? React.createElement("div", { style: { fontSize: 11, opacity: 0.6, marginBottom: 8 } }, "Pick a specific gameweek above to see a player's points breakdown.") : null,
         squadRowsDetail
       ),
-      React.createElement(Card, null,
-        React.createElement("div", { style: { fontSize: 12, opacity: 0.7, marginBottom: 8 } }, gwSel === "overall" ? "Score by gameweek" : ("Gameweek " + gwSel + " player scores")),
+      gwSel === "overall" ? React.createElement(Card, null,
+        React.createElement("div", { style: { fontSize: 12, opacity: 0.7, marginBottom: 8 } }, "Score by gameweek"),
         body
-      )
+      ) : null
     );
   }
 
