@@ -295,6 +295,107 @@ function activeWindowIndex(windows, now) {
   return -1;
 }
 
+function ymdAdd(ymd, days) {
+  var p = ymd.split("-");
+  var d = new Date(Date.UTC(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10) + days));
+  return d.toISOString().slice(0, 10);
+}
+
+// Scoring weeks: by default Friday to Thursday starting Fri 21 Aug 2026. Admin can edit any week's dates.
+function getWindows(config) {
+  var saved = (config && config.weekDates) || {};
+  var out = [];
+  for (var i = 0; i < 42; i++) {
+    var st = ymdAdd("2026-08-21", 7 * i);
+    var en = ymdAdd(st, 6);
+    var prize = 1;
+    var note = "";
+    if (en === "2026-12-31") { prize = 2; note = "Christmas week"; }
+    if (en === "2027-01-07") { prize = 2; note = "New Year week"; }
+    var sv = saved["w" + (i + 1)];
+    if (sv) {
+      if (sv.start) st = sv.start;
+      if (sv.end) en = sv.end;
+      if (sv.prize) prize = sv.prize;
+      if (sv.note !== undefined && sv.note !== null) note = sv.note;
+    }
+    out.push({ n: i + 1, start: st, end: en, prize: prize, note: note, gws: [] });
+  }
+  return out;
+}
+
+function fmtYmdShort(ymd) {
+  var p = ymd.split("-");
+  var d = new Date(Date.UTC(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10)));
+  var days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return days[d.getUTCDay()] + " " + d.getUTCDate() + " " + months[d.getUTCMonth()];
+}
+
+// Dream Team gameweeks. Gameweeks 1..N (N = config.legacyGws, default 8) are exactly the Premier League
+// matchdays 1..N. After that each Friday-Thursday window that contains Premier League matches is one
+// Dream Team gameweek (a double gameweek if it contains more than one matchday).
+function getScoringWeeks(fixturesObj, config) {
+  var cutoff = (config && config.legacyGws) ? parseInt(config.legacyGws, 10) : 8;
+  var wins = getWindows(config);
+  var over = (config && config.gwWeek) || {};
+  var keys = Object.keys(fixturesObj || {});
+  var legacy = [];
+  for (var k = 0; k < keys.length; k++) {
+    var g = fixturesObj[keys[k]];
+    if (!g || !g.gw) continue;
+    if (g.gw <= cutoff) {
+      if (!legacy.some(function (l) { return l.n === g.gw; })) legacy.push({ n: g.gw, gws: [g.gw], start: "", end: "", prize: 1, note: "", win: 0 });
+      continue;
+    }
+    var first = Infinity;
+    (g.matches || []).forEach(function (m) { if (m.date) { var t = new Date(m.date).getTime(); if (t < first) first = t; } });
+    var idx = -1;
+    var ov = over[String(g.gw)];
+    if (ov) { for (var oi = 0; oi < wins.length; oi++) if (wins[oi].n === parseInt(ov, 10)) idx = oi; }
+    if (idx < 0 && first !== Infinity) {
+      for (var wi = 0; wi < wins.length; wi++) {
+        var ws = new Date(wins[wi].start + "T00:00:00").getTime();
+        var we = new Date(wins[wi].end + "T23:59:59").getTime();
+        if (first >= ws && first <= we) { idx = wi; break; }
+        if (ws <= first) idx = wi;
+      }
+    }
+    if (idx < 0) idx = 0;
+    if (wins[idx].gws.indexOf(g.gw) < 0) wins[idx].gws.push(g.gw);
+  }
+  legacy.sort(function (a, b) { return a.n - b.n; });
+  var winWeeks = wins.filter(function (w) { return w.gws.length > 0; });
+  var weeks = legacy.slice();
+  winWeeks.forEach(function (w, wix) {
+    w.win = w.n;
+    w.n = cutoff + 1 + wix;
+    weeks.push(w);
+  });
+  weeks.forEach(function (w) {
+    w.gws.sort(function (a, b) { return a - b; });
+    w.label = "Gameweek " + w.n;
+    w.short = "GW" + w.n;
+    w.double = w.gws.length > 1;
+    w.tag = (w.prize > 1 ? "\u00d7" + w.prize + " prize" : "") + (w.note && w.note.trim() ? (w.prize > 1 ? " \u00b7 " : "") + w.note.trim() : "");
+  });
+  return weeks;
+}
+
+function weekNumOfGw(weeks, gw) {
+  for (var i = 0; i < weeks.length; i++) if (weeks[i].gws.indexOf(gw) >= 0) return weeks[i].n;
+  return gw;
+}
+
+function nextUnstartedWeekGw(fixturesObj, config, now, fallback) {
+  var weeks = getScoringWeeks(fixturesObj, config);
+  for (var i = 0; i < weeks.length; i++) {
+    var started = weeks[i].gws.some(function (g) { return gwHasStarted(fixturesObj, g, now); });
+    if (!started) return weeks[i].gws[0];
+  }
+  return fallback;
+}
+
 function nextUnstartedGw(fixturesObj, now, fallback) {
   var gwKeys = Object.keys(fixturesObj || {});
   var gwNums = gwKeys.map(function (k) { return fixturesObj[k] && fixturesObj[k].gw; }).filter(function (n) { return n; });
@@ -1356,9 +1457,14 @@ function LeagueTable(props) {
   }).filter(function (n) { return !isNaN(n); });
   gwOptionsArr.sort(function (a, b) { return a - b; });
 
+  var allWeeks = getScoringWeeks(props.fixtures || {}, props.config || {});
+  var weekOpts = allWeeks.filter(function (w) { return w.gws.some(function (g) { return resultsObj["gw" + g]; }); });
   var gwArr = React.useState("overall");
   var gwSel = gwArr[0];
   var setGwSel = gwArr[1];
+  var selWeek = null;
+  if (gwSel !== "overall") { for (var swi = 0; swi < weekOpts.length; swi++) if (weekOpts[swi].n === gwSel) selWeek = weekOpts[swi]; }
+  var selGws = selWeek ? selWeek.gws : [];
   var detailArr = React.useState(null);
   var detailTeam = detailArr[0];
   var setDetailTeam = detailArr[1];
@@ -1375,10 +1481,10 @@ function LeagueTable(props) {
       return { id: tid, teamName: t.teamName, entrantName: t.entrantName, score: total };
     });
   } else {
-    var res2 = resultsObj["gw" + gwSel];
     rowsData = teamIds.map(function (tid) {
       var t = teamsObj[tid];
-      var score = (res2 && res2.teamScores && res2.teamScores[tid] !== undefined) ? res2.teamScores[tid] : 0;
+      var score = 0;
+      selGws.forEach(function (g) { var r2 = resultsObj["gw" + g]; if (r2 && r2.teamScores && r2.teamScores[tid] !== undefined) score += r2.teamScores[tid]; });
       return { id: tid, teamName: t.teamName, entrantName: t.entrantName, score: score };
     });
   }
@@ -1388,31 +1494,17 @@ function LeagueTable(props) {
     var team = teamsObj[detailTeam];
     var body;
     if (gwSel === "overall") {
-      var histRows = gwOptionsArr.map(function (n) {
-        var res3 = resultsObj["gw" + n];
-        var sc = (res3 && res3.teamScores && res3.teamScores[detailTeam] !== undefined) ? res3.teamScores[detailTeam] : 0;
-        return React.createElement("div", { key: n, style: { display: "flex", justifyContent: "space-between", padding: "6px 4px", borderBottom: "1px solid #1c3253", fontSize: 13 } },
-          React.createElement("span", null, "Gameweek " + n),
+      var histRows = weekOpts.map(function (wk) {
+        var sc = 0;
+        wk.gws.forEach(function (g) { var res3 = resultsObj["gw" + g]; if (res3 && res3.teamScores && res3.teamScores[detailTeam] !== undefined) sc += res3.teamScores[detailTeam]; });
+        return React.createElement("div", { key: wk.n, style: { display: "flex", justifyContent: "space-between", padding: "6px 4px", borderBottom: "1px solid #1c3253", fontSize: 13 } },
+          React.createElement("span", null, wk.label + (wk.double ? " (double)" : "") + (wk.tag ? " \u00b7 " + wk.tag : "")),
           React.createElement("b", { style: { color: "#ffd23f" } }, sc)
         );
       });
       body = histRows.length ? histRows : React.createElement("div", { style: { fontSize: 13, opacity: 0.7 } }, "No gameweeks scored yet.");
     } else {
-      var statsForGw = gwstatsObj["gw" + gwSel] || {};
-      var pids = sortIdsByPos(effectiveSquad(team, gwSel));
-      var playerRows = pids.map(function (pid) {
-        var pl = PLAYERS_BY_ID[pid];
-        if (!pl) return null;
-        var sc = computeScore(statsForGw[pid], pl.pos);
-        return React.createElement("div", {
-          key: pid, onClick: function (pidx, st) { return function () { openPlayerBreakdown(pidx, st, "GW" + gwSel); }; }(pid, statsForGw[pid]),
-          style: { display: "flex", justifyContent: "space-between", padding: "6px 4px", borderBottom: "1px solid #1c3253", fontSize: 13 }
-        },
-          React.createElement("span", null, pl.name + " (" + pl.pos + ")"),
-          React.createElement("b", { style: { color: "#ffd23f" } }, sc)
-        );
-      });
-      body = playerRows;
+      body = null;
     }
     var allSyncedGwIds = Object.keys(gwstatsObj);
     var detailIds;
@@ -1424,7 +1516,14 @@ function LeagueTable(props) {
         for (var dei = 0; dei < dEff.length; dei++) { if (detailIds.indexOf(dEff[dei]) < 0) detailIds.push(dEff[dei]); }
       }
     } else {
-      detailIds = effectiveSquad(team, parseInt(gwSel, 10));
+      detailIds = [];
+      selGws.forEach(function (g) {
+        effectiveSquad(team, g).forEach(function (x) { if (detailIds.indexOf(x) < 0) detailIds.push(x); });
+      });
+      if (selGws.length) {
+        var lastEff = effectiveSquad(team, selGws[selGws.length - 1]);
+        detailIds = lastEff.concat(detailIds.filter(function (x) { return lastEff.indexOf(x) < 0; }));
+      }
     }
     var detailFormation = team.formation;
     if (gwSel !== "overall") {
@@ -1436,6 +1535,7 @@ function LeagueTable(props) {
       var pl = PLAYERS_BY_ID[pid];
       if (!pl) return null;
       var pts, clickStat, clickLabel, clickable;
+      var splitParts = [];
       if (gwSel === "overall") {
         pts = 0;
         for (var sgi = 0; sgi < allSyncedGwIds.length; sgi++) {
@@ -1445,10 +1545,18 @@ function LeagueTable(props) {
         }
         clickable = false;
       } else {
-        var gwStatsForSel = gwstatsObj["gw" + gwSel] || {};
-        pts = computeScore(gwStatsForSel[pid], pl.pos);
-        clickStat = gwStatsForSel[pid];
-        clickLabel = "GW" + gwSel;
+        pts = 0;
+        clickStat = [];
+        splitParts = [];
+        selGws.forEach(function (g, gIdx) {
+          if (effectiveSquad(team, g).indexOf(pid) < 0) { splitParts.push("Match " + (gIdx + 1) + ": \u2013"); return; }
+          var st1 = (gwstatsObj["gw" + g] || {})[pid];
+          var p1 = computeScore(st1, pl.pos);
+          pts += p1;
+          clickStat.push({ label: "Match " + (gIdx + 1), stat: st1 });
+          splitParts.push("Match " + (gIdx + 1) + ": " + p1);
+        });
+        clickLabel = selWeek ? selWeek.label : "";
         clickable = true;
       }
       return React.createElement("div", {
@@ -1456,13 +1564,26 @@ function LeagueTable(props) {
         onClick: clickable ? function (pidx, stat, lbl) { return function () { openPlayerBreakdown(pidx, stat, lbl); }; }(pid, clickStat, clickLabel) : undefined,
         style: { display: "flex", justifyContent: "space-between", padding: "6px 4px", borderBottom: "1px solid #1c3253", fontSize: 13 }
       },
-        React.createElement("span", null, pl.name + " (" + pl.pos + ")"),
+        React.createElement("div", null,
+          React.createElement("span", null, pl.name + " (" + pl.pos + ")"),
+          splitParts.length > 1 ? React.createElement("div", { style: { fontSize: 11, opacity: 0.7 } }, splitParts.join(" \u00b7 ")) : null
+        ),
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("b", { style: { color: "#6fcf6f" } }, pts + " pts"),
           React.createElement("span", { style: { opacity: 0.7 } }, pl.club + " \u00b7 " + fmtMoney(pl.price))
         )
       );
     });
+    var matchTotals = [];
+    var weekTotal = 0;
+    if (gwSel !== "overall") {
+      selGws.forEach(function (g, gIdx) {
+        var mt = 0;
+        effectiveSquad(team, g).forEach(function (x) { var pp = PLAYERS_BY_ID[x]; if (pp) mt += computeScore((gwstatsObj["gw" + g] || {})[x], pp.pos); });
+        matchTotals.push("Match " + (gIdx + 1) + ": " + mt);
+        weekTotal += mt;
+      });
+    }
     return React.createElement(React.Fragment, null,
       React.createElement(Header, { sub: team.teamName }),
       React.createElement(Card, null,
@@ -1471,8 +1592,9 @@ function LeagueTable(props) {
         team.sweepstakeClub ? React.createElement("div", { style: { fontSize: 12, color: "#ffd23f", marginTop: 4 } }, "\ud83c\udfc6 Sweepstake team: " + team.sweepstakeClub) : null
       ),
       React.createElement(Card, null,
-        React.createElement("div", { style: { fontWeight: 700, marginBottom: 8 } }, "Squad" + (gwSel === "overall" ? " \u2014 season total points" : " \u2014 GW" + gwSel + " points")),
+        React.createElement("div", { style: { fontWeight: 700, marginBottom: 8 } }, "Squad" + (gwSel === "overall" ? " \u2014 season total points" : " \u2014 " + (selWeek ? selWeek.label : "") + " points" + (selWeek && selWeek.tag ? " (" + selWeek.tag + ")" : ""))),
         gwSel === "overall" ? React.createElement("div", { style: { fontSize: 11, opacity: 0.6, marginBottom: 8 } }, "Pick a specific gameweek above to see a player's points breakdown.") : null,
+        (gwSel !== "overall" && selGws.length > 1) ? React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "#ffd23f", marginBottom: 8 } }, "Double gameweek \u2014 " + matchTotals.join(" \u00b7 ") + " \u00b7 Total: " + weekTotal) : null,
         squadRowsDetail
       ),
       gwSel === "overall" ? React.createElement(Card, null,
@@ -1482,9 +1604,9 @@ function LeagueTable(props) {
     );
   }
 
-  var latestSyncedGw = gwOptionsArr.length ? gwOptionsArr[gwOptionsArr.length - 1] : null;
-  var gwPickOptions = gwOptionsArr.map(function (n) {
-    return React.createElement("option", { key: n, value: n }, "Gameweek " + n);
+  var latestSyncedGw = weekOpts.length ? weekOpts[weekOpts.length - 1].n : null;
+  var gwPickOptions = weekOpts.map(function (wk) {
+    return React.createElement("option", { key: wk.n, value: wk.n }, wk.label + (wk.double ? " (double)" : "") + (wk.tag ? " \u00b7 " + wk.tag : ""));
   });
 
   var rows = rowsData.map(function (row, idx) {
@@ -1520,6 +1642,7 @@ function LeagueTable(props) {
         onChange: function (e) { if (e.target.value) setGwSel(parseInt(e.target.value, 10)); },
         style: { width: "100%", padding: 10, borderRadius: 8, marginBottom: 10, background: "#1c3253", color: "#fff", border: "none", fontSize: 14 }
       }, [React.createElement("option", { key: "pick", value: "" }, "Or pick a specific gameweek\u2026")].concat(gwPickOptions)) : null,
+      selWeek && selWeek.tag ? React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "#ffd23f", marginBottom: 8 } }, "\ud83c\udf84 " + selWeek.label + ": " + selWeek.tag) : null,
       canViewDetail ? React.createElement("div", { style: { fontSize: 11, opacity: 0.6, marginBottom: 8 } }, "Tap a team to see " + (gwSel === "overall" ? "their score history" : "their player-by-player score for that week")) : null,
       rowsData.length ? rows : React.createElement("div", { style: { opacity: 0.7, fontSize: 13 } }, "No teams entered yet.")
     )
@@ -2338,6 +2461,9 @@ function AdminEntrants(props) {
   var gridStats = gridStatsArr[0] || {};
   var gridResultsArr = useDbValue("results", {});
   var gridResults = gridResultsArr[0] || {};
+  var gridCfgArr = useDbValue("config", {});
+  var config = gridCfgArr[0] || {};
+  var fixturesObj = props.fixtures || {};
   var editIdArr = React.useState(null);
   var editId = editIdArr[0];
   var setEditId = editIdArr[1];
@@ -2431,11 +2557,11 @@ function AdminEntrants(props) {
       row(["ENTRANT", t.entrantName || "", "TEAM", t.teamName || "", "Current formation", t.formation || ""]);
       var tlog = t.transferLog || [];
       if (t.pendingEmergency) {
-        row(["Transfer (pending)", "Emergency", (t.pendingEmergency.outName || "?") + " -> " + (t.pendingEmergency.inName || "?"), "Counts from GW" + t.pendingEmergency.effectiveGw]);
+        row(["Transfer (pending)", "Emergency", (t.pendingEmergency.outName || "?") + " -> " + (t.pendingEmergency.inName || "?"), "Counts from GW" + weekNumOfGw(getScoringWeeks(fixturesObj, config), t.pendingEmergency.effectiveGw)]);
       }
       for (var li = 0; li < tlog.length; li++) {
         var le = tlog[li];
-        row(["Transfer", le.type === "emergency" ? "Emergency" : "Window", (le.outName || "?") + " -> " + (le.inName || "?"), "Counts from GW" + legacyEntryGw(le), le.timestamp ? ("Recorded " + new Date(le.timestamp).toLocaleString("en-GB")) : ""]);
+        row(["Transfer", le.type === "emergency" ? "Emergency" : "Window", (le.outName || "?") + " -> " + (le.inName || "?"), "Counts from GW" + weekNumOfGw(getScoringWeeks(fixturesObj, config), legacyEntryGw(le)), le.timestamp ? ("Recorded " + new Date(le.timestamp).toLocaleString("en-GB")) : ""]);
       }
       if (!tlog.length && !t.pendingEmergency) row(["Transfers", "None"]);
       // squads per gameweek
@@ -2451,7 +2577,12 @@ function AdminEntrants(props) {
       for (var ci = 0; ci < curIds.length; ci++) if (everIds.indexOf(curIds[ci]) < 0) everIds.push(curIds[ci]);
       everIds = sortIdsByPos(everIds);
       var header = ["Player", "Pos", "Club", "Price (m)"];
-      for (var hg = 0; hg < gwNums.length; hg++) header.push("GW" + gwNums[hg]);
+      var gridWeeks = getScoringWeeks(fixturesObj, config);
+      for (var hg = 0; hg < gwNums.length; hg++) {
+        var hwk = null;
+        gridWeeks.forEach(function (w) { if (w.gws.indexOf(gwNums[hg]) >= 0) hwk = w; });
+        header.push(hwk ? ("GW" + hwk.n + (hwk.gws.length > 1 ? " match " + (hwk.gws.indexOf(gwNums[hg]) + 1) : "")) : ("PL" + gwNums[hg]));
+      }
       header.push("Total", "Notes");
       row(header);
       var gwTotals = {};
@@ -2561,7 +2692,7 @@ function AdminEntrants(props) {
       if (!le || le.type === undefined) return null;
       var effNow = legacyEntryGw(le);
       return React.createElement("div", { key: "tl" + lix, style: { display: "flex", alignItems: "center", gap: 6, marginTop: 4, flexWrap: "wrap" } },
-        React.createElement("span", { style: { fontSize: 11, opacity: 0.8 } }, (le.type === "emergency" ? "Emergency" : "Window") + ": " + (le.outName || "?") + " \u2192 " + (le.inName || "?") + " \u00b7 counts from GW"),
+        React.createElement("span", { style: { fontSize: 11, opacity: 0.8 } }, (le.type === "emergency" ? "Emergency" : "Window") + ": " + (le.outName || "?") + " \u2192 " + (le.inName || "?") + " \u00b7 counts from PL matchday"),
         React.createElement("input", {
           type: "number", defaultValue: effNow, id: "tlgw-" + tid + "-" + lix,
           style: { width: 50, padding: 4, borderRadius: 6, background: "#12233f", color: "#fff", border: "1px solid #3d5a8a", fontSize: 12 }
@@ -2850,7 +2981,7 @@ function MyTeam(props) {
       mode: "transfer", transferKind: "window",
       teamId: foundId, initialSelected: team.playerIds || [],
       windowIndex: winIdx, maxChanges: windowTransfersLeft, transferLog: team.transferLog || [],
-      windowEffectiveGw: nextUnstartedGw(props.fixtures, Math.max(now, new Date(((windows[winIdx] || {}).activeFrom || "2000-01-01") + "T00:00:00").getTime()), currentGw + 1),
+      windowEffectiveGw: nextUnstartedWeekGw(props.fixtures, config, Math.max(now, new Date(((windows[winIdx] || {}).activeFrom || "2000-01-01") + "T00:00:00").getTime()), currentGw + 1),
       onSaved: function () { setTransferMode(null); setMsg("Transfer(s) saved."); },
       onCancel: function () { setTransferMode(null); }
     });
@@ -2860,40 +2991,68 @@ function MyTeam(props) {
       players: ALL_PLAYERS, gwstats: props.gwstats,
       mode: "transfer", transferKind: "emergency",
       teamId: foundId, initialSelected: team.playerIds || [],
-      emergencyEffectiveGw: nextUnstartedGw(props.fixtures, now, currentGw + 1),
-      onSaved: function () { setTransferMode(null); setMsg("Emergency transfer locked in \u2014 it will take effect from the start of Gameweek " + nextUnstartedGw(props.fixtures, now, currentGw + 1) + " kick-off."); },
+      emergencyEffectiveGw: nextUnstartedWeekGw(props.fixtures, config, now, currentGw + 1),
+      onSaved: function () { setTransferMode(null); setMsg("Emergency transfer locked in \u2014 it will take effect from the start of Gameweek " + weekNumOfGw(getScoringWeeks(props.fixtures || {}, config), nextUnstartedWeekGw(props.fixtures, config, now, currentGw + 1)) + " kick-off."); },
       onCancel: function () { setTransferMode(null); }
     });
   }
 
   var gwstatsAll = props.gwstats || {};
-  var gwstatsKeysAll = Object.keys(gwstatsAll);
-  var maxSyncedGwNum = 0;
-  var maxSyncedGwId = null;
-  for (var gsx = 0; gsx < gwstatsKeysAll.length; gsx++) {
-    var gn = parseInt(gwstatsKeysAll[gsx].replace("gw", ""), 10);
-    if (!isNaN(gn) && gn > maxSyncedGwNum) { maxSyncedGwNum = gn; maxSyncedGwId = gwstatsKeysAll[gsx]; }
+  var myWeeks = getScoringWeeks(props.fixtures || {}, config);
+  var latestWeek = null;
+  for (var mwi = 0; mwi < myWeeks.length; mwi++) {
+    if (myWeeks[mwi].gws.some(function (g) { return gwstatsAll["gw" + g]; })) latestWeek = myWeeks[mwi];
   }
-  var latestStats = maxSyncedGwId ? gwstatsAll[maxSyncedGwId] : {};
-  var effIdsForWeek = maxSyncedGwNum ? effectiveSquad(team, maxSyncedGwNum) : (team.playerIds || []);
+  var maxSyncedGwId = latestWeek ? "week" : null;
+  var weekGwsWithStats = latestWeek ? latestWeek.gws.filter(function (g) { return gwstatsAll["gw" + g]; }) : [];
+  var maxSyncedGwNum = latestWeek ? latestWeek.n : "";
+  function weekPts(id, pl) {
+    var tot = 0;
+    weekGwsWithStats.forEach(function (g) {
+      if (effectiveSquad(team, g).indexOf(id) >= 0) tot += computeScore((gwstatsAll["gw" + g] || {})[id], pl.pos);
+    });
+    return tot;
+  }
+  function weekParts(id) {
+    var parts = [];
+    weekGwsWithStats.forEach(function (g) {
+      if (effectiveSquad(team, g).indexOf(id) >= 0) parts.push({ label: "Match " + (latestWeek.gws.indexOf(g) + 1), stat: (gwstatsAll["gw" + g] || {})[id] });
+    });
+    return parts;
+  }
+  function weekSplit(id, pl) {
+    if (!latestWeek || latestWeek.gws.length < 2) return "";
+    return latestWeek.gws.map(function (g, gi) {
+      if (effectiveSquad(team, g).indexOf(id) < 0) return "Match " + (gi + 1) + ": \u2013";
+      if (!gwstatsAll["gw" + g]) return "Match " + (gi + 1) + ": not played yet";
+      return "Match " + (gi + 1) + ": " + computeScore((gwstatsAll["gw" + g] || {})[id], pl.pos);
+    }).join(" \u00b7 ");
+  }
   var teamWeeklyPoints = 0;
-  for (var wpi = 0; wpi < effIdsForWeek.length; wpi++) {
-    var wpl = PLAYERS_BY_ID[effIdsForWeek[wpi]];
-    if (wpl) teamWeeklyPoints += computeScore(latestStats[effIdsForWeek[wpi]], wpl.pos);
-  }
+  var teamMatchTotals = [];
+  weekGwsWithStats.forEach(function (g) {
+    var mtt = 0;
+    effectiveSquad(team, g).forEach(function (pidw) {
+      var wpl = PLAYERS_BY_ID[pidw];
+      if (wpl) mtt += computeScore((gwstatsAll["gw" + g] || {})[pidw], wpl.pos);
+    });
+    teamWeeklyPoints += mtt;
+    teamMatchTotals.push("Match " + (latestWeek.gws.indexOf(g) + 1) + ": " + mtt);
+  });
 
   var squadRows = sortIdsByPos(team.playerIds || []).map(function (id) {
     var pl = PLAYERS_BY_ID[id];
     if (!pl) return null;
-    var pts = maxSyncedGwId ? (effIdsForWeek.indexOf(id) >= 0 ? computeScore(latestStats[id], pl.pos) : 0) : null;
+    var pts = maxSyncedGwId ? weekPts(id, pl) : null;
     return React.createElement("div", {
       key: id,
-      onClick: pts !== null ? function (pid, st, lbl) { return function () { openPlayerBreakdown(pid, st, lbl); }; }(id, latestStats[id], "GW" + maxSyncedGwNum) : undefined,
+      onClick: pts !== null ? function (pid, st, lbl) { return function () { openPlayerBreakdown(pid, st, lbl); }; }(id, weekParts(id), latestWeek ? latestWeek.label : "") : undefined,
       style: { display: "flex", justifyContent: "space-between", padding: "8px 10px", borderRadius: 8, marginBottom: 6, background: pl.injured ? "#5c2222" : "#1c3253", border: pl.injured ? "1px solid #ff5555" : "none" }
     },
       React.createElement("div", null,
         React.createElement("div", { style: { fontWeight: 600, fontSize: 14 } }, (pl.injured ? "\ud83d\udd34 " : "") + pl.name),
-        React.createElement("div", { style: { fontSize: 11, opacity: 0.7 } }, pl.pos + " \u00b7 " + pl.club + (pl.injured ? " \u00b7 Injured" : ""))
+        React.createElement("div", { style: { fontSize: 11, opacity: 0.7 } }, pl.pos + " \u00b7 " + pl.club + (pl.injured ? " \u00b7 Injured" : "")),
+        (latestWeek && latestWeek.gws.length > 1) ? React.createElement("div", { style: { fontSize: 11, color: "#ffd23f" } }, weekSplit(id, pl)) : null
       ),
       React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
         pts !== null ? React.createElement("div", { style: { background: "#274b8c", borderRadius: 8, padding: "4px 8px", color: "#ffd23f", fontWeight: 700, fontSize: 12 } }, pts + " pts") : null,
@@ -2907,10 +3066,10 @@ function MyTeam(props) {
     var chips = groupedSquad[pos].map(function (id) {
       var pl = PLAYERS_BY_ID[id];
       if (!pl) return null;
-      var pts = maxSyncedGwId ? (effIdsForWeek.indexOf(id) >= 0 ? computeScore(latestStats[id], pl.pos) : 0) : null;
+      var pts = maxSyncedGwId ? weekPts(id, pl) : null;
       return React.createElement("div", {
         key: id,
-        onClick: pts !== null ? function (pid, st, lbl) { return function () { openPlayerBreakdown(pid, st, lbl); }; }(id, latestStats[id], "GW" + maxSyncedGwNum) : undefined,
+        onClick: pts !== null ? function (pid, st, lbl) { return function () { openPlayerBreakdown(pid, st, lbl); }; }(id, weekParts(id), latestWeek ? latestWeek.label : "") : undefined,
         style: { background: pl.injured ? "#5c2222" : "#274b8c", border: pl.injured ? "1px solid #ff5555" : "none", borderRadius: 10, padding: "8px 6px", textAlign: "center", flex: 1, minWidth: 78, margin: 3 }
       },
         React.createElement("div", { style: { fontSize: 12, fontWeight: 700 } }, (pl.injured ? "\ud83d\udd34 " : "") + pl.name),
@@ -2934,7 +3093,7 @@ function MyTeam(props) {
   }
   if (pending) {
     statusLines.push(React.createElement("div", { key: "pend", style: { fontSize: 12, color: "#ffd23f", marginBottom: 6 } },
-      "Emergency transfer pending: " + pending.outName + " \u2192 " + pending.inName + ", effective from Gameweek " + pending.effectiveGw + " kick-off."));
+      "Emergency transfer pending: " + pending.outName + " \u2192 " + pending.inName + ", effective from Gameweek " + weekNumOfGw(getScoringWeeks(props.fixtures || {}, config), pending.effectiveGw) + " kick-off."));
   } else if (team.emergencyUsed) {
     statusLines.push(React.createElement("div", { key: "used", style: { fontSize: 12, opacity: 0.7, marginBottom: 6 } }, "Emergency transfer: already used."));
   } else if (emergencyAvailable) {
@@ -2965,7 +3124,7 @@ function MyTeam(props) {
     ) : null,
     React.createElement(Card, null,
       React.createElement("div", { style: { fontSize: 13, marginBottom: 4 } }, team.entrantName + " \u00b7 " + team.formation + " \u00b7 " + fmtMoney(team.cost || 0)),
-      maxSyncedGwId ? React.createElement("div", { style: { fontSize: 15, fontWeight: 800, color: "#6fcf6f", marginBottom: 4 } }, "\u26bd GW" + maxSyncedGwNum + ": " + teamWeeklyPoints + " pts") : React.createElement("div", { style: { fontSize: 12, opacity: 0.6, marginBottom: 4 } }, "No gameweek scores synced yet"),
+      maxSyncedGwId ? React.createElement("div", { style: { fontSize: 15, fontWeight: 800, color: "#6fcf6f", marginBottom: 4 } }, "\u26bd GW" + maxSyncedGwNum + ": " + teamWeeklyPoints + " pts" + (latestWeek && latestWeek.tag ? " \u00b7 " + latestWeek.tag : "") + (latestWeek && latestWeek.gws.length > 1 ? " \u00b7 double gameweek (" + teamMatchTotals.join(", ") + ")" : "")) : React.createElement("div", { style: { fontSize: 12, opacity: 0.6, marginBottom: 4 } }, "No gameweek scores synced yet"),
       React.createElement("div", { style: { fontSize: 12, marginBottom: 4 } },
         "\ud83d\udcb0 Paid \u00a3" + teamPaid + " of \u00a380",
         teamOwed > 0 ? React.createElement("span", { style: { color: "#ff9a9a" } }, " \u2014 " + "\u00a3" + teamOwed + " still owed") : React.createElement("span", { style: { color: "#6fcf6f" } }, " \u2014 fully paid")
@@ -3069,12 +3228,111 @@ function AdminSettings(props) {
   );
 }
 
+function AdminWeeks(props) {
+  var cfgArr = useDbValue("config", {});
+  var config = cfgArr[0] || {};
+  var fixturesObj = props.fixtures || {};
+  var wins = getWindows(config);
+  var weeks = getScoringWeeks(fixturesObj, config);
+  var gwsByWin = {};
+  weeks.forEach(function (w) { if (w.win) gwsByWin[w.win] = w; });
+  var msgArr = React.useState("");
+  var msg = msgArr[0];
+  var setMsg = msgArr[1];
+  var inputStyle = { padding: 6, borderRadius: 6, background: "#1c3253", color: "#fff", border: "1px solid #3d5a8a", fontSize: 12 };
+
+  function saveWeek(n) {
+    var st = document.getElementById("wk-start-" + n).value;
+    var en = document.getElementById("wk-end-" + n).value;
+    var pz = parseInt(document.getElementById("wk-prize-" + n).value, 10) || 1;
+    var nt = document.getElementById("wk-note-" + n).value || "";
+    if (!st || !en || en < st) { setMsg("Check the dates (end must be on or after start)."); return; }
+    window.db.ref("config/weekDates/w" + n).set({ start: st, end: en, prize: pz, note: nt || " " }).then(function () {
+      setMsg("Saved.");
+    });
+  }
+  function resetAll() {
+    if (!window.confirm("Reset every week back to Friday-Thursday and clear all manual matchday moves?")) return;
+    window.db.ref("config/weekDates").remove();
+    window.db.ref("config/gwWeek").remove();
+    setMsg("Reset to Friday-Thursday defaults.");
+  }
+  function moveGw(gw, val) {
+    if (!val) { window.db.ref("config/gwWeek/" + gw).remove(); return; }
+    window.db.ref("config/gwWeek/" + gw).set(parseInt(val, 10));
+  }
+
+  var gwKeys = Object.keys(fixturesObj).map(function (k) { return fixturesObj[k] && fixturesObj[k].gw; }).filter(function (n) { return n; });
+  gwKeys = gwKeys.filter(function (n, i) { return gwKeys.indexOf(n) === i; }).sort(function (a, b) { return a - b; });
+  var over = config.gwWeek || {};
+
+  var winOptions = [React.createElement("option", { key: "auto", value: "" }, "Automatic (by date)")].concat(wins.map(function (w) {
+    return React.createElement("option", { key: w.n, value: w.n }, fmtYmdShort(w.start) + " – " + fmtYmdShort(w.end));
+  }));
+
+  var gwRows = gwKeys.map(function (g) {
+    var fx = fixturesObj["gw" + g];
+    var wk = null;
+    weeks.forEach(function (w) { if (w.gws.indexOf(g) >= 0) wk = w; });
+    return React.createElement("div", { key: g, style: { display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid #1c3253", flexWrap: "wrap" } },
+      React.createElement("div", { style: { fontSize: 13, fontWeight: 700, minWidth: 90 } }, "PL matchday " + g),
+      React.createElement("div", { style: { fontSize: 11, opacity: 0.7, flex: 1, minWidth: 100 } }, fmtGwDateRange(fx && fx.matches) + (wk ? " → Dream Team gameweek " + wk.n : "")),
+      React.createElement("select", {
+        key: g + "-" + (over[String(g)] || "auto"), defaultValue: over[String(g)] || "",
+        onChange: function (gg) { return function (e) { moveGw(gg, e.target.value); }; }(g),
+        style: Object.assign({}, inputStyle, { maxWidth: 190 })
+      }, winOptions)
+    );
+  });
+
+  var winRows = wins.map(function (w) {
+    var wk = gwsByWin[w.n];
+    return React.createElement("div", { key: w.n + "-" + w.start + "-" + w.end + "-" + w.prize + "-" + w.note, style: { padding: "8px 0", borderBottom: "1px solid #1c3253", opacity: wk ? 1 : 0.55 } },
+      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 } },
+        React.createElement("b", { style: { fontSize: 13 } }, fmtYmdShort(w.start) + " – " + fmtYmdShort(w.end) + (wk ? " · " + wk.label + (wk.double ? " (double)" : "") : " · no matches")),
+        w.prize > 1 ? React.createElement("span", { style: { fontSize: 11, color: "#ffd23f", fontWeight: 700 } }, "×" + w.prize + " prize" + (w.note && w.note.trim() ? " · " + w.note : "")) : (w.note && w.note.trim() ? React.createElement("span", { style: { fontSize: 11, opacity: 0.7 } }, w.note) : null)
+      ),
+      React.createElement("div", { style: { display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" } },
+        React.createElement("input", { type: "date", id: "wk-start-" + w.n, defaultValue: w.start, style: inputStyle }),
+        React.createElement("span", { style: { fontSize: 11 } }, "to"),
+        React.createElement("input", { type: "date", id: "wk-end-" + w.n, defaultValue: w.end, style: inputStyle }),
+        React.createElement("select", { id: "wk-prize-" + w.n, defaultValue: String(w.prize), style: inputStyle },
+          React.createElement("option", { value: "1" }, "Normal prize"),
+          React.createElement("option", { value: "2" }, "Double prize")
+        ),
+        React.createElement("input", { id: "wk-note-" + w.n, defaultValue: (w.note || "").trim(), placeholder: "Note (e.g. Christmas)", style: Object.assign({}, inputStyle, { width: 130 }) }),
+        React.createElement("button", { onClick: function (nn) { return function () { saveWeek(nn); }; }(w.n), style: { padding: "6px 10px", borderRadius: 6, border: "none", background: "#ffd23f", color: "#12233f", fontSize: 11, fontWeight: 800 } }, "Save")
+      )
+    );
+  });
+
+  return React.createElement(React.Fragment, null,
+    React.createElement(Card, null,
+      React.createElement("div", { style: { fontWeight: 800, fontSize: 16, marginBottom: 6 } }, "Gameweek dates"),
+      React.createElement("div", { style: { fontSize: 12, opacity: 0.8, marginBottom: 8 } }, "Dream Team gameweeks 1–8 are the first eight Premier League matchdays, exactly as played. From Gameweek 9 onwards each Dream Team gameweek runs Friday to Thursday and includes every Premier League match played in those dates. If a team plays twice in that window (for example a midweek round after the weekend), it's a double gameweek: both matches score in that one gameweek, and the team view shows each match separately plus the total. Gameweeks are numbered in order, skipping weeks with no matches. Change any week's dates below and tap Save, or move a single Premier League matchday into a different week in the last list. Nothing needs recalculating after a change."),
+      React.createElement("div", { style: { fontSize: 12, color: "#ffd23f", marginBottom: 8 } }, "Double prize weeks: Christmas week (Fri 25 – Thu 31 Dec 2026) and New Year week (Fri 1 – Thu 7 Jan 2027) are set to ×2 already."),
+      msg ? React.createElement("div", { style: { fontSize: 12, color: "#6fcf6f", marginBottom: 8 } }, msg) : null,
+      React.createElement(Btn, { variant: "ghost", onClick: resetAll }, "Reset all to Friday–Thursday")
+    ),
+    React.createElement(Card, null,
+      React.createElement("div", { style: { fontWeight: 700, marginBottom: 6 } }, "Friday–Thursday weeks (from Gameweek 9)"),
+      winRows
+    ),
+    React.createElement(Card, null,
+      React.createElement("div", { style: { fontWeight: 700, marginBottom: 2 } }, "Move a Premier League matchday to a different week"),
+      React.createElement("div", { style: { fontSize: 11, opacity: 0.7, marginBottom: 6 } }, "Only needed if a matchday has landed in the wrong week."),
+      gwRows.length ? gwRows : React.createElement("div", { style: { fontSize: 12, opacity: 0.7 } }, "No fixtures loaded yet — run Update scores first.")
+    )
+  );
+}
+
 function AdminTab(props) {
   var subArr = React.useState("stats");
   var sub = subArr[0];
   var setSub = subArr[1];
   var subs = [
     { key: "stats", label: "Update scores" },
+    { key: "weeks", label: "Gameweeks" },
     { key: "fixtures", label: "Fixtures" },
     { key: "players", label: "Players" },
     { key: "entrants", label: "Entrants" },
@@ -3097,6 +3355,7 @@ function AdminTab(props) {
       }, "Lock")
     ),
     sub === "stats" ? React.createElement(AdminStats, { teams: props.teams, fixtures: props.fixtures }) : null,
+    sub === "weeks" ? React.createElement(AdminWeeks, { fixtures: props.fixtures }) : null,
     sub === "fixtures" ? React.createElement(AdminFixtures, { fixtures: props.fixtures }) : null,
     sub === "players" ? React.createElement(AdminPlayers, { playersDb: props.playersDb, teams: props.teams }) : null,
     sub === "entrants" ? React.createElement(AdminEntrants, { teams: props.teams, fixtures: props.fixtures }) : null,
@@ -3124,8 +3383,19 @@ function PlayerBreakdownOverlay() {
   if (!data) return null;
   var pl = PLAYERS_BY_ID[data.playerId];
   if (!pl) return null;
-  var breakdown = scoreBreakdown(data.stat, pl.pos);
+  var multi = Array.isArray(data.stat);
+  var parts = multi ? data.stat : [{ label: "", stat: data.stat }];
+  var combinedLines = [];
+  var combinedTotal = 0;
+  parts.forEach(function (pt) {
+    var bd = scoreBreakdown(pt.stat, pl.pos);
+    if (parts.length > 1) combinedLines.push({ heading: pt.label });
+    bd.lines.forEach(function (l) { combinedLines.push(l); });
+    combinedTotal += bd.total;
+  });
+  var breakdown = { lines: combinedLines, total: combinedTotal };
   var lineRows = breakdown.lines.map(function (l, i) {
+    if (l.heading !== undefined) return React.createElement("div", { key: i, style: { fontWeight: 800, fontSize: 12, color: "#ffd23f", marginTop: 8, paddingBottom: 2 } }, l.heading);
     return React.createElement("div", { key: i, style: { display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #26406e", fontSize: 13 } },
       React.createElement("span", null, l.label),
       React.createElement("b", { style: { color: l.pts >= 0 ? "#6fcf6f" : "#ff9a9a" } }, (l.pts >= 0 ? "+" : "") + l.pts)
@@ -3255,7 +3525,7 @@ function App() {
     onSubmitted: function () { setRegInfo(null); setTab("myteam"); }
   });
   else if (tab === "myteam") body = React.createElement(MyTeam, { teams: teams, config: config, gwstats: gwstats, fixtures: fixtures });
-  else if (tab === "table") body = React.createElement(LeagueTable, { teams: teams, results: results, gwstats: gwstats });
+  else if (tab === "table") body = React.createElement(LeagueTable, { teams: teams, results: results, gwstats: gwstats, fixtures: fixtures, config: config });
   else if (tab === "fixtures") body = React.createElement(Fixtures, { fixtures: fixtures, gwstats: gwstats });
   else if (tab === "scores") body = React.createElement(PlayersScoresTab, { gwstats: gwstats });
   else if (tab === "rules") body = React.createElement(RulesTab, null);
