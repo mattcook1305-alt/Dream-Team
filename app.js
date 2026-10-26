@@ -1679,6 +1679,16 @@ function fmtGwDateRange(matches) {
   return first[2] + " " + months[parseInt(first[1], 10) - 1] + " - " + last[2] + " " + months[mIdx] + " " + last[0];
 }
 
+function clubMatchesFixtureName(ourClub, fxName) {
+  function key(n) {
+    return normName(n).split(" ").filter(function (t) { return t && t !== "fc" && t !== "afc"; }).join(" ");
+  }
+  var o = canonClub(key(ourClub));
+  var f = canonClub(key(fxName));
+  if (!o || !f) return false;
+  return o === f || f.indexOf(o + " ") === 0 || o.indexOf(f + " ") === 0;
+}
+
 function Fixtures(props) {
   var fixturesObj = props.fixtures || {};
   var gwstatsObj = props.gwstats || {};
@@ -1717,7 +1727,7 @@ function Fixtures(props) {
       { club: selMatch.match.away }
     ];
     var sideBlocks = sides.map(function (side) {
-      var clubPlayers = ALL_PLAYERS.filter(function (p) { return p.club === side.club; }).slice().sort(function (a, b) {
+      var clubPlayers = ALL_PLAYERS.filter(function (p) { return clubMatchesFixtureName(p.club, side.club); }).slice().sort(function (a, b) {
         return POS_ORDER.indexOf(a.pos) - POS_ORDER.indexOf(b.pos);
       });
       var rows = clubPlayers.map(function (p) {
