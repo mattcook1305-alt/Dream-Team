@@ -912,34 +912,23 @@ function Home(props) {
       },
         React.createElement("div", { style: { fontSize: 18, fontWeight: 800, marginBottom: 4 } }, "\ud83d\udcd6 Rules"),
         React.createElement("div", { style: { fontSize: 12, opacity: 0.75 } }, "How the competition and scoring works")
-      ),
-      React.createElement("div", {
-        key: "another", onClick: function () { props.onNav("team"); },
-        style: { textAlign: "center", fontSize: 13, color: "#ffd23f", textDecoration: "underline" }
-      }, "Enter another team")
+      )
     ];
   } else {
     mainCards = [
+      React.createElement("div", {
+        key: "login", onClick: function () { props.onNav("myteam"); },
+        style: { background: "#ffd23f", color: "#12233f", borderRadius: 16, padding: "22px", textAlign: "center", boxShadow: "0 2px 6px rgba(0,0,0,0.3)", marginBottom: 16 }
+      },
+        React.createElement("div", { style: { fontSize: 20, fontWeight: 800, marginBottom: 4 } }, "\ud83d\udd11 Login"),
+        React.createElement("div", { style: { fontSize: 12, opacity: 0.75 } }, "Already entered? Sign in to manage your team")
+      ),
       React.createElement("div", {
         key: "rules", onClick: function () { props.onNav("rules"); },
         style: { background: "#152a4d", borderRadius: 16, padding: "20px", marginBottom: 16, textAlign: "center", boxShadow: "0 2px 6px rgba(0,0,0,0.3)" }
       },
         React.createElement("div", { style: { fontSize: 18, fontWeight: 800, marginBottom: 4 } }, "\ud83d\udcd6 Rules"),
         React.createElement("div", { style: { fontSize: 12, opacity: 0.75 } }, "How the competition and scoring works")
-      ),
-      React.createElement("div", {
-        key: "enter", onClick: function () { props.onNav("team"); },
-        style: { background: "#ffd23f", color: "#12233f", borderRadius: 16, padding: "22px", textAlign: "center", boxShadow: "0 2px 6px rgba(0,0,0,0.3)", marginBottom: 16 }
-      },
-        React.createElement("div", { style: { fontSize: 20, fontWeight: 800, marginBottom: 4 } }, "\u26bd Enter"),
-        React.createElement("div", { style: { fontSize: 12, opacity: 0.8 } }, "Set up your account and pick your 11")
-      ),
-      React.createElement("div", {
-        key: "login", onClick: function () { props.onNav("myteam"); },
-        style: { background: "#1c3253", borderRadius: 16, padding: "18px", textAlign: "center", boxShadow: "0 2px 6px rgba(0,0,0,0.3)" }
-      },
-        React.createElement("div", { style: { fontSize: 16, fontWeight: 800, marginBottom: 4 } }, "\ud83d\udd11 Login"),
-        React.createElement("div", { style: { fontSize: 12, opacity: 0.75 } }, "Already entered? Sign in to manage your team")
       )
     ];
   }
@@ -1468,6 +1457,9 @@ function LeagueTable(props) {
   var detailArr = React.useState(null);
   var detailTeam = detailArr[0];
   var setDetailTeam = detailArr[1];
+  var searchArr = React.useState("");
+  var tableSearch = searchArr[0];
+  var setTableSearch = searchArr[1];
 
   var rowsData;
   if (gwSel === "overall") {
@@ -1609,7 +1601,14 @@ function LeagueTable(props) {
     return React.createElement("option", { key: wk.n, value: wk.n }, wk.label + (wk.double ? " (double)" : "") + (wk.tag ? " \u00b7 " + wk.tag : ""));
   });
 
-  var rows = rowsData.map(function (row, idx) {
+  var searchQ = (tableSearch || "").trim().toLowerCase();
+  var rankOf = {};
+  rowsData.forEach(function (r, ix) { rankOf[r.id] = ix + 1; });
+  var shownRows = searchQ ? rowsData.filter(function (r) {
+    return (r.teamName || "").toLowerCase().indexOf(searchQ) >= 0 || (r.entrantName || "").toLowerCase().indexOf(searchQ) >= 0;
+  }) : rowsData;
+  var rows = shownRows.map(function (row) {
+    var idx = rankOf[row.id] - 1;
     return React.createElement("div", {
       key: row.id, onClick: canViewDetail ? function (tid) { return function () { setDetailTeam(tid); }; }(row.id) : undefined,
       style: { display: "flex", justifyContent: "space-between", padding: "8px 10px", borderRadius: 8, marginBottom: 6, background: idx < 5 ? "#2c5f2d33" : "#1c3253" }
@@ -1643,8 +1642,13 @@ function LeagueTable(props) {
         style: { width: "100%", padding: 10, borderRadius: 8, marginBottom: 10, background: "#1c3253", color: "#fff", border: "none", fontSize: 14 }
       }, [React.createElement("option", { key: "pick", value: "" }, "Or pick a specific gameweek\u2026")].concat(gwPickOptions)) : null,
       selWeek && selWeek.tag ? React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "#ffd23f", marginBottom: 8 } }, "\ud83c\udf84 " + selWeek.label + ": " + selWeek.tag) : null,
+      React.createElement("input", {
+        placeholder: "\ud83d\udd0d Search entrant or team name", value: tableSearch,
+        onChange: function (e) { setTableSearch(e.target.value); },
+        style: { width: "100%", padding: 10, borderRadius: 8, marginBottom: 10, background: "#1c3253", color: "#fff", border: "none", fontSize: 14 }
+      }),
       canViewDetail ? React.createElement("div", { style: { fontSize: 11, opacity: 0.6, marginBottom: 8 } }, "Tap a team to see " + (gwSel === "overall" ? "their score history" : "their player-by-player score for that week")) : null,
-      rowsData.length ? rows : React.createElement("div", { style: { opacity: 0.7, fontSize: 13 } }, "No teams entered yet.")
+      rowsData.length ? (rows.length ? rows : React.createElement("div", { style: { opacity: 0.7, fontSize: 13 } }, "No entrant or team matches \"" + tableSearch + "\".")) : React.createElement("div", { style: { opacity: 0.7, fontSize: 13 } }, "No teams entered yet.")
     )
   );
 }
@@ -1682,22 +1686,28 @@ function Fixtures(props) {
   var selMatch = selArr[0];
   var setSelMatch = selArr[1];
 
-  var gwNums = Object.keys(fixturesObj).map(function (k) {
-    return (fixturesObj[k] && fixturesObj[k].gw) || 0;
-  }).filter(function (n) { return n; });
-  gwNums = gwNums.filter(function (n, i) { return gwNums.indexOf(n) === i; });
-  gwNums.sort(function (a, b) { return a - b; });
+  var fxWeeks = getScoringWeeks(fixturesObj, props.config || {});
+  var gwNums = fxWeeks.map(function (w) { return w.n; });
+  function weekMatches(w) {
+    var out = [];
+    w.gws.forEach(function (g) {
+      var gwo = fixturesObj["gw" + g];
+      ((gwo && gwo.matches) || []).forEach(function (m) { out.push({ m: m, gwId: "gw" + g }); });
+    });
+    out.sort(function (a, b) { return (a.m.date || "") < (b.m.date || "") ? -1 : ((a.m.date || "") > (b.m.date || "") ? 1 : 0); });
+    return out;
+  }
 
   var defaultGw = gwNums.length ? gwNums[gwNums.length - 1] : 1;
-  for (var dgi = 0; dgi < gwNums.length; dgi++) {
-    var gwCheck = fixturesObj["gw" + gwNums[dgi]];
-    var stillToPlay = (gwCheck && gwCheck.matches || []).some(function (m) { return m.status !== "FINISHED"; });
-    if (stillToPlay) { defaultGw = gwNums[dgi]; break; }
+  for (var dgi = 0; dgi < fxWeeks.length; dgi++) {
+    var stillToPlay = weekMatches(fxWeeks[dgi]).some(function (x) { return x.m.status !== "FINISHED"; });
+    if (stillToPlay) { defaultGw = fxWeeks[dgi].n; break; }
   }
   var activeGwArr = React.useState(defaultGw);
   var activeGw = activeGwArr[0];
   var setActiveGw = activeGwArr[1];
-  var activeGwId = "gw" + activeGw;
+  var activeWeek = null;
+  fxWeeks.forEach(function (w) { if (w.n === activeGw) activeWeek = w; });
 
   if (selMatch) {
     var statsForGw = gwstatsObj[selMatch.gwId] || {};
@@ -1715,7 +1725,7 @@ function Fixtures(props) {
         if (!st) return null;
         var sc = computeScore(st, p.pos);
         return React.createElement("div", {
-          key: p.id, onClick: function (pid, stat) { return function () { openPlayerBreakdown(pid, stat, selMatch.gwId.toUpperCase()); }; }(p.id, st),
+          key: p.id, onClick: function (pid, stat) { return function () { openPlayerBreakdown(pid, stat, ""); }; }(p.id, st),
           style: { display: "flex", justifyContent: "space-between", padding: "5px 4px", borderBottom: "1px solid #1c3253", fontSize: 13 }
         },
           React.createElement("span", null, p.name + " (" + p.pos + ")"),
@@ -1759,15 +1769,16 @@ function Fixtures(props) {
     }, "GW" + n);
   });
 
-  var gw = fixturesObj[activeGwId];
-  var hasStats = Object.keys(gwstatsObj[activeGwId] || {}).length > 0;
-  var matches = gw ? (gw.matches || []) : [];
-  var matchRows = matches.map(function (m, i) {
+  var weekMatchList = activeWeek ? weekMatches(activeWeek) : [];
+  var matches = weekMatchList.map(function (x) { return x.m; });
+  var matchRows = weekMatchList.map(function (x, i) {
+    var m = x.m;
+    var hasStats = Object.keys(gwstatsObj[x.gwId] || {}).length > 0;
     var clickable = m.status === "FINISHED" && hasStats;
     var finished = m.status === "FINISHED";
     return React.createElement("div", {
       key: i,
-      onClick: clickable ? function (gwid, match) { return function () { setSelMatch({ gwId: gwid, match: match }); }; }(activeGwId, m) : undefined,
+      onClick: clickable ? function (gwid, match) { return function () { setSelMatch({ gwId: gwid, match: match }); }; }(x.gwId, m) : undefined,
       style: {
         display: "flex", justifyContent: "space-between", alignItems: "center",
         padding: "9px 10px", borderRadius: 8, marginBottom: 5,
@@ -1789,7 +1800,7 @@ function Fixtures(props) {
     React.createElement("div", { style: { display: "flex", overflowX: "auto", padding: "0 14px 4px" } }, gwPills),
     React.createElement(Card, null,
       React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 } },
-        React.createElement("div", { style: { fontSize: 18, fontWeight: 800, color: "#6fcf6f" } }, "GW" + activeGw),
+        React.createElement("div", { style: { fontSize: 18, fontWeight: 800, color: "#6fcf6f" } }, "GW" + activeGw + (activeWeek && activeWeek.double ? " \u00b7 double gameweek" : "") + (activeWeek && activeWeek.tag ? " \u00b7 " + activeWeek.tag : "")),
         React.createElement("div", { style: { fontSize: 12, opacity: 0.7 } }, fmtGwDateRange(matches))
       ),
       matchRows.length ? matchRows : React.createElement("div", { style: { fontSize: 13, opacity: 0.7 } }, "No matches for this gameweek."),
@@ -1817,35 +1828,61 @@ function PlayersScoresTab(props) {
   var filterArr = React.useState({ pos: "ALL", club: "ALL", search: "" });
   var filter = filterArr[0];
   var setFilter = filterArr[1];
+  var sortArr = React.useState({ key: "points", dir: "desc" });
+  var sortSel = sortArr[0];
+  var setSortSel = sortArr[1];
 
   var gwIds = Object.keys(gwstatsAll);
-  var maxGwNum = 0;
-  var maxGwId = null;
-  for (var gx = 0; gx < gwIds.length; gx++) {
-    var n = parseInt(gwIds[gx].replace("gw", ""), 10);
-    if (!isNaN(n) && n > maxGwNum) { maxGwNum = n; maxGwId = gwIds[gx]; }
-  }
+  var weeksAll = getScoringWeeks(props.fixtures || {}, props.config || {});
+  var weeksWithStats = weeksAll.filter(function (w) { return w.gws.some(function (g) { return gwstatsAll["gw" + g]; }); });
+  var latestWeek = weeksWithStats.length ? weeksWithStats[weeksWithStats.length - 1] : null;
+  var formGws = [];
+  weeksWithStats.slice(-3).forEach(function (w) { w.gws.forEach(function (g) { formGws.push(g); }); });
 
   var totals = {};
+  var goalsTot = {};
+  var assistsTot = {};
+  var csTot = {};
   for (var gi = 0; gi < gwIds.length; gi++) {
     var statsForGw = gwstatsAll[gwIds[gi]];
     var pids = Object.keys(statsForGw || {});
     for (var pi = 0; pi < pids.length; pi++) {
       var pl = PLAYERS_BY_ID[pids[pi]];
       if (!pl) continue;
-      var sc = computeScore(statsForGw[pids[pi]], pl.pos);
-      totals[pids[pi]] = (totals[pids[pi]] || 0) + sc;
+      var st = statsForGw[pids[pi]];
+      totals[pids[pi]] = (totals[pids[pi]] || 0) + computeScore(st, pl.pos);
+      goalsTot[pids[pi]] = (goalsTot[pids[pi]] || 0) + (st.goals || 0);
+      assistsTot[pids[pi]] = (assistsTot[pids[pi]] || 0) + (st.assists || 0);
+      if ((st.mins || 0) >= 60 && (st.goalsConceded || 0) === 0 && (pl.pos === "GK" || pl.pos === "DEF" || pl.pos === "MID")) {
+        csTot[pids[pi]] = (csTot[pids[pi]] || 0) + 1;
+      }
     }
   }
 
-  var recentScores = {};
-  if (maxGwId) {
-    var statsRecent = gwstatsAll[maxGwId] || {};
-    for (var pj = 0; pj < ALL_PLAYERS.length; pj++) {
-      var pl2 = ALL_PLAYERS[pj];
-      recentScores[pl2.id] = computeScore(statsRecent[pl2.id], pl2.pos);
-    }
+  function sumGws(gws, p) {
+    var t = 0;
+    gws.forEach(function (g) { t += computeScore((gwstatsAll["gw" + g] || {})[p.id], p.pos); });
+    return t;
   }
+  var recentScores = {};
+  var formScores = {};
+  for (var pj = 0; pj < ALL_PLAYERS.length; pj++) {
+    var pl2 = ALL_PLAYERS[pj];
+    recentScores[pl2.id] = latestWeek ? sumGws(latestWeek.gws, pl2) : 0;
+    formScores[pl2.id] = sumGws(formGws, pl2);
+  }
+
+  var SORTS = [
+    { key: "points", label: "Points", unit: " pts", val: function (p) { return totals[p.id] || 0; } },
+    { key: "price", label: "Price", unit: "", val: function (p) { return Number(p.price) || 0; }, fmt: function (v) { return "£" + v.toFixed(1) + "m"; } },
+    { key: "form", label: "Form", unit: " pts", val: function (p) { return formScores[p.id] || 0; }, sub: "last 3 gameweeks" },
+    { key: "goals", label: "Goals", unit: "", val: function (p) { return goalsTot[p.id] || 0; } },
+    { key: "assists", label: "Assists", unit: "", val: function (p) { return assistsTot[p.id] || 0; } },
+    { key: "cs", label: "Clean sheets", unit: "", val: function (p) { return csTot[p.id] || 0; } },
+    { key: "ppm", label: "Pts per £m", unit: "", val: function (p) { var pr = Number(p.price) || 0; return pr > 0 ? (totals[p.id] || 0) / pr : 0; }, fmt: function (v) { return v.toFixed(1); } }
+  ];
+  var activeSort = SORTS[0];
+  SORTS.forEach(function (sx) { if (sx.key === sortSel.key) activeSort = sx; });
 
   var filtered = ALL_PLAYERS.filter(function (p) {
     if (filter.pos !== "ALL" && p.pos !== filter.pos) return false;
@@ -1853,7 +1890,10 @@ function PlayersScoresTab(props) {
     if (filter.search && p.name.toLowerCase().indexOf(filter.search.toLowerCase()) === -1) return false;
     return true;
   });
+  var dirMul = sortSel.dir === "asc" ? 1 : -1;
   filtered = filtered.slice().sort(function (a, b) {
+    var d = (activeSort.val(a) - activeSort.val(b)) * dirMul;
+    if (d !== 0) return d;
     return (totals[b.id] || 0) - (totals[a.id] || 0);
   });
 
@@ -1865,20 +1905,40 @@ function PlayersScoresTab(props) {
   var rows = filtered.map(function (p) {
     var tot = totals[p.id] || 0;
     var recent = recentScores[p.id] || 0;
-    var recentStat = maxGwId ? (gwstatsAll[maxGwId] || {})[p.id] : null;
+    var mainVal = activeSort.val(p);
+    var mainText = activeSort.fmt ? activeSort.fmt(mainVal) : (mainVal + activeSort.unit);
+    var secondText = activeSort.key === "points"
+      ? (latestWeek ? ("GW" + latestWeek.n + ": " + recent) : "—")
+      : (tot + " pts total" + (activeSort.key === "price" ? "" : " · £" + Number(p.price).toFixed(1) + "m"));
+    var parts = [];
+    if (latestWeek) {
+      latestWeek.gws.forEach(function (g, gIdx) {
+        var s1 = (gwstatsAll["gw" + g] || {})[p.id];
+        if (s1) parts.push({ label: "Match " + (gIdx + 1), stat: s1 });
+      });
+    }
     return React.createElement("div", {
-      key: p.id, onClick: function (pid, stat, lbl) { return function () { openPlayerBreakdown(pid, stat, lbl); }; }(p.id, recentStat, maxGwId ? ("GW" + maxGwNum) : ""),
-      style: { display: "flex", justifyContent: "space-between", padding: "8px 10px", borderRadius: 8, marginBottom: 6, background: "#1c3253" }
+      key: p.id, onClick: function (pid, prt, lbl) { return function () { openPlayerBreakdown(pid, prt, lbl); }; }(p.id, parts, latestWeek ? ("GW" + latestWeek.n) : ""),
+      style: { display: "flex", justifyContent: "space-between", padding: "8px 10px", borderRadius: 8, marginBottom: 6, background: p.injured ? "#5c2222" : "#1c3253" }
     },
       React.createElement("div", null,
-        React.createElement("div", { style: { fontWeight: 600, fontSize: 14 } }, p.name),
-        React.createElement("div", { style: { fontSize: 11, opacity: 0.7 } }, p.pos + " \u00b7 " + p.club + " \u00b7 \u00a3" + Number(p.price).toFixed(1) + "m")
+        React.createElement("div", { style: { fontWeight: 600, fontSize: 14 } }, (p.injured ? "🔴 " : "") + p.name),
+        React.createElement("div", { style: { fontSize: 11, opacity: 0.7 } }, p.pos + " · " + p.club + " · £" + Number(p.price).toFixed(1) + "m")
       ),
       React.createElement("div", { style: { textAlign: "right" } },
-        React.createElement("div", { style: { fontWeight: 700, color: "#ffd23f" } }, tot + " pts"),
-        React.createElement("div", { style: { fontSize: 11, opacity: 0.7 } }, maxGwId ? ("GW" + maxGwNum + ": " + recent) : "\u2014")
+        React.createElement("div", { style: { fontWeight: 700, color: "#ffd23f" } }, mainText),
+        React.createElement("div", { style: { fontSize: 11, opacity: 0.7 } }, secondText)
       )
     );
+  });
+
+  var sortButtons = SORTS.map(function (sx) {
+    var on = sx.key === sortSel.key;
+    return React.createElement("button", {
+      key: sx.key,
+      onClick: function (k) { return function () { setSortSel({ key: k, dir: "desc" }); }; }(sx.key),
+      style: { padding: "6px 10px", borderRadius: 8, border: "none", background: on ? "#6fcf6f" : "#1c3253", color: on ? "#0e1b33" : "#fff", fontSize: 12, fontWeight: 700, flexShrink: 0 }
+    }, sx.label);
   });
 
   return React.createElement(React.Fragment, null,
@@ -1901,9 +1961,19 @@ function PlayersScoresTab(props) {
         onChange: function (e) { setFilter(Object.assign({}, filter, { search: e.target.value })); },
         style: { width: "100%", padding: 8, borderRadius: 8, marginBottom: 10, background: "#1c3253", color: "#fff", border: "none" }
       }),
-      gwIds.length === 0
-        ? React.createElement("div", { style: { fontSize: 12, opacity: 0.7, marginBottom: 8 } }, "No stats synced yet \u2014 scores appear once the admin enters gameweek stats and syncs.")
-        : React.createElement("div", { style: { fontSize: 11, opacity: 0.7, marginBottom: 8 } }, "Most recent gameweek: GW" + maxGwNum),
+      React.createElement("div", { style: { fontSize: 11, opacity: 0.7, marginBottom: 4 } }, "Sort by"),
+      React.createElement("div", { style: { display: "flex", gap: 6, overflowX: "auto", marginBottom: 8, paddingBottom: 2 } }, sortButtons),
+      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 } },
+        React.createElement("div", { style: { fontSize: 11, opacity: 0.7 } },
+          gwIds.length === 0
+            ? "No stats synced yet — scores appear once the admin updates scores."
+            : (activeSort.key === "form" ? "Form = points over the last 3 gameweeks" : (activeSort.key === "ppm" ? "Total points divided by price" : (latestWeek ? "Most recent gameweek: GW" + latestWeek.n : "")))
+        ),
+        React.createElement("button", {
+          onClick: function () { setSortSel({ key: sortSel.key, dir: sortSel.dir === "desc" ? "asc" : "desc" }); },
+          style: { padding: "4px 10px", borderRadius: 8, border: "1px solid #3d5a8a", background: "transparent", color: "#fff", fontSize: 11, fontWeight: 700 }
+        }, sortSel.dir === "desc" ? "High → Low" : "Low → High")
+      ),
       React.createElement("div", { style: { maxHeight: 460, overflowY: "auto" } }, rows)
     )
   );
@@ -3333,7 +3403,6 @@ function AdminTab(props) {
   var subs = [
     { key: "stats", label: "Update scores" },
     { key: "weeks", label: "Gameweeks" },
-    { key: "fixtures", label: "Fixtures" },
     { key: "players", label: "Players" },
     { key: "entrants", label: "Entrants" },
     { key: "settings", label: "Settings" }
@@ -3356,7 +3425,6 @@ function AdminTab(props) {
     ),
     sub === "stats" ? React.createElement(AdminStats, { teams: props.teams, fixtures: props.fixtures }) : null,
     sub === "weeks" ? React.createElement(AdminWeeks, { fixtures: props.fixtures }) : null,
-    sub === "fixtures" ? React.createElement(AdminFixtures, { fixtures: props.fixtures }) : null,
     sub === "players" ? React.createElement(AdminPlayers, { playersDb: props.playersDb, teams: props.teams }) : null,
     sub === "entrants" ? React.createElement(AdminEntrants, { teams: props.teams, fixtures: props.fixtures }) : null,
     sub === "settings" ? React.createElement(AdminSettings, null) : null
@@ -3508,7 +3576,6 @@ function App() {
 
   var tabs = [
     { key: "home", label: "Home" },
-    { key: "team", label: "Build" },
     { key: "myteam", label: "My Team" },
     { key: "table", label: "Table" },
     { key: "fixtures", label: "Fixtures" },
@@ -3526,8 +3593,8 @@ function App() {
   });
   else if (tab === "myteam") body = React.createElement(MyTeam, { teams: teams, config: config, gwstats: gwstats, fixtures: fixtures });
   else if (tab === "table") body = React.createElement(LeagueTable, { teams: teams, results: results, gwstats: gwstats, fixtures: fixtures, config: config });
-  else if (tab === "fixtures") body = React.createElement(Fixtures, { fixtures: fixtures, gwstats: gwstats });
-  else if (tab === "scores") body = React.createElement(PlayersScoresTab, { gwstats: gwstats });
+  else if (tab === "fixtures") body = React.createElement(Fixtures, { fixtures: fixtures, gwstats: gwstats, config: config });
+  else if (tab === "scores") body = React.createElement(PlayersScoresTab, { gwstats: gwstats, fixtures: fixtures, config: config });
   else if (tab === "rules") body = React.createElement(RulesTab, null);
   else if (tab === "admin") body = React.createElement(AdminTab, { teams: teams, fixtures: fixtures, playersDb: playersDb });
 
