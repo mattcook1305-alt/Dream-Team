@@ -2288,6 +2288,10 @@ function AdminEntrants(props) {
   var setSyncMsg = syncArr[1];
   var gwArr = useDbValue("config/currentGameweek", 1);
   var currentGw = gwArr[0];
+  var gridStatsArr = useDbValue("gwstats", {});
+  var gridStats = gridStatsArr[0] || {};
+  var gridResultsArr = useDbValue("results", {});
+  var gridResults = gridResultsArr[0] || {};
   var editIdArr = React.useState(null);
   var editId = editIdArr[0];
   var setEditId = editIdArr[1];
@@ -2359,6 +2363,102 @@ function AdminEntrants(props) {
     var a = document.createElement("a");
     a.href = url;
     a.download = "dreamteam-entrants-" + new Date().toISOString().slice(0, 10) + ".csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function exportSeasonGrid() {
+    var gwNums = Object.keys(gridStats).map(function (k) { return parseInt(k.replace("gw", ""), 10); }).filter(function (n) { return !isNaN(n); }).sort(function (a, b) { return a - b; });
+    var lines = [];
+    var tids = teamIds.slice().sort(function (a, b) {
+      return ((teamsObj[a].entrantName || "") + (teamsObj[a].teamName || "")).toLowerCase() < ((teamsObj[b].entrantName || "") + (teamsObj[b].teamName || "")).toLowerCase() ? -1 : 1;
+    });
+    function row(arr) { lines.push(arr.map(csvEscape).join(",")); }
+    row(["Dream Team season grid", "Exported " + new Date().toLocaleString("en-GB"), "Gameweeks with stats: " + (gwNums.length ? ("GW" + gwNums[0] + " to GW" + gwNums[gwNums.length - 1]) : "none")]);
+    row(["Blank cell = player was not in that team that gameweek. Points use the current scoring rules."]);
+    lines.push("");
+    for (var ti = 0; ti < tids.length; ti++) {
+      var tid = tids[ti];
+      var t = teamsObj[tid];
+      row(["ENTRANT", t.entrantName || "", "TEAM", t.teamName || "", "Current formation", t.formation || ""]);
+      var tlog = t.transferLog || [];
+      if (t.pendingEmergency) {
+        row(["Transfer (pending)", "Emergency", (t.pendingEmergency.outName || "?") + " -> " + (t.pendingEmergency.inName || "?"), "Counts from GW" + t.pendingEmergency.effectiveGw]);
+      }
+      for (var li = 0; li < tlog.length; li++) {
+        var le = tlog[li];
+        row(["Transfer", le.type === "emergency" ? "Emergency" : "Window", (le.outName || "?") + " -> " + (le.inName || "?"), "Counts from GW" + legacyEntryGw(le), le.timestamp ? ("Recorded " + new Date(le.timestamp).toLocaleString("en-GB")) : ""]);
+      }
+      if (!tlog.length && !t.pendingEmergency) row(["Transfers", "None"]);
+      // squads per gameweek
+      var squadByGw = {};
+      var everIds = [];
+      var allGwForTeam = gwNums.slice();
+      for (var gi = 0; gi < allGwForTeam.length; gi++) {
+        var sq = effectiveSquad(t, allGwForTeam[gi]);
+        squadByGw[allGwForTeam[gi]] = sq;
+        for (var qi = 0; qi < sq.length; qi++) if (everIds.indexOf(sq[qi]) < 0) everIds.push(sq[qi]);
+      }
+      var curIds = t.playerIds || [];
+      for (var ci = 0; ci < curIds.length; ci++) if (everIds.indexOf(curIds[ci]) < 0) everIds.push(curIds[ci]);
+      everIds = sortIdsByPos(everIds);
+      var header = ["Player", "Pos", "Club", "Price (m)"];
+      for (var hg = 0; hg < gwNums.length; hg++) header.push("GW" + gwNums[hg]);
+      header.push("Total", "Notes");
+      row(header);
+      var gwTotals = {};
+      for (var pi = 0; pi < everIds.length; pi++) {
+        var pid = everIds[pi];
+        var pl = PLAYERS_BY_ID[pid];
+        var rowArr = [pl ? pl.name : pid, pl ? pl.pos : "", pl ? pl.club : "", pl ? pl.price : ""];
+        var tot = 0;
+        var first = null;
+        var last = null;
+        for (var gj = 0; gj < gwNums.length; gj++) {
+          var gnum = gwNums[gj];
+          if (squadByGw[gnum].indexOf(pid) >= 0) {
+            var pts = pl ? computeScore((gridStats["gw" + gnum] || {})[pid], pl.pos) : 0;
+            rowArr.push(pts);
+            tot += pts;
+            gwTotals[gnum] = (gwTotals[gnum] || 0) + pts;
+            if (first === null) first = gnum;
+            last = gnum;
+          } else {
+            rowArr.push("");
+          }
+        }
+        var note = "";
+        if (first !== null && first > gwNums[0]) note += "IN from GW" + first + ". ";
+        if (last !== null && last < gwNums[gwNums.length - 1]) note += "OUT after GW" + last + ".";
+        rowArr.push(tot, note.trim());
+        row(rowArr);
+      }
+      var calcRow = ["Team total (recalculated)", "", "", ""];
+      var storedRow = ["Team total (stored in app)", "", "", ""];
+      var diffRow = ["Difference (should be 0)", "", "", ""];
+      var calcSum = 0;
+      var storedSum = 0;
+      for (var gk = 0; gk < gwNums.length; gk++) {
+        var gn2 = gwNums[gk];
+        var calc = gwTotals[gn2] || 0;
+        var res = gridResults["gw" + gn2];
+        var stored = (res && res.teamScores && res.teamScores[tid] !== undefined) ? res.teamScores[tid] : 0;
+        calcRow.push(calc); storedRow.push(stored); diffRow.push(calc - stored);
+        calcSum += calc; storedSum += stored;
+      }
+      calcRow.push(calcSum, ""); storedRow.push(storedSum, ""); diffRow.push(calcSum - storedSum, "");
+      row(calcRow); row(storedRow); row(diffRow);
+      lines.push("");
+      lines.push("");
+    }
+    var csv = "\ufeff" + lines.join("\r\n");
+    var blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "dreamteam-season-grid-" + new Date().toISOString().slice(0, 10) + ".csv";
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -2509,7 +2609,10 @@ function AdminEntrants(props) {
   return React.createElement(Card, null,
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 6 } },
       React.createElement("div", { style: { fontWeight: 700 } }, "Entrants (" + teamIds.length + " teams, " + paidCount + " fully paid)"),
-      React.createElement(Btn, { variant: "ghost", onClick: exportTeamsCSV }, "\u2b07\ufe0f Export")
+      React.createElement("div", { style: { display: "flex", gap: 6, flexWrap: "wrap" } },
+        React.createElement(Btn, { variant: "ghost", onClick: exportTeamsCSV }, "\u2b07\ufe0f Export"),
+        React.createElement(Btn, { variant: "ghost", onClick: exportSeasonGrid }, "\u2b07\ufe0f Season grid")
+      )
     ),
     React.createElement("div", { style: { fontSize: 11, opacity: 0.7, marginBottom: 8 } }, "Emergency transfers apply automatically once their effective gameweek arrives \u2014 no action needed here. Scores recalculate automatically whenever fixtures/stats are synced from Admin > Stats entry."),
     syncMsg ? React.createElement("div", { style: { fontSize: 11, color: "#ffd23f", marginBottom: 8 } }, syncMsg) : null,
