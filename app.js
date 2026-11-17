@@ -278,13 +278,34 @@ function csvEscape(val) {
   return s;
 }
 
-function nowMs() { return Date.now(); }
+window.dtServerOffset = 0;
+try {
+  window.db.ref(".info/serverTimeOffset").on("value", function (snap) {
+    var v = snap && snap.val ? snap.val() : 0;
+    window.dtServerOffset = (typeof v === "number") ? v : 0;
+  });
+} catch (e) { window.dtServerOffset = 0; }
+// Server-corrected time, so a phone with a wrong clock cannot keep a window open or closed.
+function nowMs() { return Date.now() + (window.dtServerOffset || 0); }
+
+// Date (YYYY-MM-DD) and clock time in London for a timestamp. The competition runs on UK time.
+function londonParts(ms) {
+  try {
+    var parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).formatToParts(new Date(ms));
+    var o = {};
+    parts.forEach(function (p) { o[p.type] = p.value; });
+    return { ymd: o.year + "-" + o.month + "-" + o.day };
+  } catch (e) {
+    var d = new Date(ms);
+    var m = d.getMonth() + 1, dd = d.getDate();
+    return { ymd: d.getFullYear() + "-" + (m < 10 ? "0" : "") + m + "-" + (dd < 10 ? "0" : "") + dd };
+  }
+}
 
 function dateInRange(now, openStr, closeStr) {
   if (!openStr || !closeStr) return false;
-  var open = new Date(openStr + "T00:00:00").getTime();
-  var close = new Date(closeStr + "T23:59:59").getTime();
-  return now >= open && now <= close;
+  var ymd = londonParts(now).ymd;
+  return ymd >= openStr && ymd <= closeStr;
 }
 
 function activeWindowIndex(windows, now) {
@@ -1156,6 +1177,10 @@ function TeamBuilder(props) {
       var outIds = initial.filter(function (id) { return selected.indexOf(id) < 0; });
       var inIds = selected.filter(function (id) { return initial.indexOf(id) < 0; });
       if (outIds.length === 0) { setMsg("No changes made yet."); return; }
+      if (props.canTransferNow && !props.canTransferNow()) {
+        setMsg("Sorry \u2014 this transfer " + (props.transferKind === "window" ? "window has now closed" : "period is no longer open") + ", so the change can't be saved.");
+        return;
+      }
       var limit = props.transferKind === "emergency" ? 1 : (props.transferKind === "window" ? props.maxChanges : Infinity);
       if (outIds.length > limit) {
         setMsg(props.transferKind === "emergency"
@@ -2882,6 +2907,12 @@ function AdminEntrants(props) {
 function MyTeam(props) {
   var teamsObj = props.teams || {};
   var config = props.config || {};
+  var tickArr = React.useState(0);
+  var setTick = tickArr[1];
+  React.useEffect(function () {
+    var iv = setInterval(function () { setTick(function (v) { return v + 1; }); }, 30000);
+    return function () { clearInterval(iv); };
+  }, []);
   var nameArr = React.useState("");
   var nameInput = nameArr[0];
   var setNameInput = nameArr[1];
@@ -3061,6 +3092,7 @@ function MyTeam(props) {
       mode: "transfer", transferKind: "window",
       teamId: foundId, initialSelected: team.playerIds || [],
       windowIndex: winIdx, maxChanges: windowTransfersLeft, transferLog: team.transferLog || [],
+      canTransferNow: function () { return activeWindowIndex(windows, nowMs()) >= 0; },
       windowEffectiveGw: nextUnstartedWeekGw(props.fixtures, config, Math.max(now, new Date(((windows[winIdx] || {}).activeFrom || "2000-01-01") + "T00:00:00").getTime()), currentGw + 1),
       onSaved: function () { setTransferMode(null); setMsg("Transfer(s) saved."); },
       onCancel: function () { setTransferMode(null); }
@@ -3071,6 +3103,7 @@ function MyTeam(props) {
       players: ALL_PLAYERS, gwstats: props.gwstats,
       mode: "transfer", transferKind: "emergency",
       teamId: foundId, initialSelected: team.playerIds || [],
+      canTransferNow: function () { return activeWindowIndex(windows, nowMs()) < 0 && inAnyPeriod(emergencyPeriods, nowMs()); },
       emergencyEffectiveGw: nextUnstartedWeekGw(props.fixtures, config, now, currentGw + 1),
       onSaved: function () { setTransferMode(null); setMsg("Emergency transfer locked in \u2014 it will take effect from the start of Gameweek " + weekNumOfGw(getScoringWeeks(props.fixtures || {}, config), nextUnstartedWeekGw(props.fixtures, config, now, currentGw + 1)) + " kick-off."); },
       onCancel: function () { setTransferMode(null); }
