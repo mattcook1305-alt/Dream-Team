@@ -1450,6 +1450,21 @@ function TeamBuilder(props) {
     (props.mode === "edit" || props.mode === "transfer") && props.onCancel
       ? React.createElement(Card, null, React.createElement(Btn, { variant: "ghost", onClick: props.onCancel }, "\u2190 Cancel, discard changes"))
       : null,
+    (function () {
+      if (props.mode !== "transfer") return null;
+      var initIds = props.initialSelected || [];
+      var changed = initIds.filter(function (id) { return selected.indexOf(id) < 0; }).length;
+      var total = props.transferKind === "emergency" ? 1 : (props.maxChanges || 0);
+      var left = Math.max(0, total - changed);
+      return React.createElement(Card, null,
+        React.createElement("div", { style: { fontSize: 16, fontWeight: 800, color: left > 0 ? "#6fcf6f" : "#ffd23f" } },
+          left + (left === 1 ? " transfer remaining" : " transfers remaining")),
+        React.createElement("div", { style: { fontSize: 11, opacity: 0.7, marginTop: 4 } },
+          props.transferKind === "emergency"
+            ? "Your one emergency transfer for the season. Tap a player to swap them out."
+            : "Tap a player to swap them out, pick their replacement, then press Confirm transfer. Transfers you haven't used stay available until the window closes.")
+      );
+    })(),
     summary,
     mainContent,
     footer
@@ -3052,8 +3067,7 @@ function MyTeam(props) {
     if (id === foundId) return;
     dtSaveLogin(id);
     setFoundId(id);
-    setOutId(null);
-    setMode(null);
+    setTransferMode(null);
     setEditing(false);
   }
 
@@ -3254,7 +3268,7 @@ function MyTeam(props) {
       React.createElement("div", { style: { fontSize: 12, opacity: 0.7, marginBottom: 8 } }, "Tap a player to see their points breakdown for the latest gameweek."),
       squadView === "list" ? squadRows : squadPitchView,
       !preSeasonUnlimited && (windowOpen && windowTransfersLeft > 0 || emergencyAvailable) ? React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" } },
-        windowOpen && windowTransfersLeft > 0 ? React.createElement(Btn, { onClick: function () { setTransferMode("window"); } }, "Use window transfer") : null,
+        windowOpen && windowTransfersLeft > 0 ? React.createElement(Btn, { onClick: function () { setTransferMode("window"); } }, "Enter transfer window") : null,
         emergencyAvailable ? React.createElement(Btn, { variant: "danger", onClick: function () { setTransferMode("emergency"); } }, "Use emergency transfer") : null
       ) : null,
       msg ? React.createElement("div", { style: { fontSize: 12, color: "#ffd23f", marginTop: 10 } }, msg) : null
