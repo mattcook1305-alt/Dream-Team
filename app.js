@@ -1215,6 +1215,7 @@ function TeamBuilder(props) {
           timestamp: nowMs()
         };
       });
+      if (props.byAdmin) { for (var bai = 0; bai < newEntries.length; bai++) newEntries[bai].byAdmin = true; }
       window.db.ref("teams/" + props.teamId).update({
         formation: finalFormation,
         playerIds: selected,
@@ -2590,6 +2591,9 @@ function AdminEntrants(props) {
   var editValArr = React.useState({ teamName: "", entrantName: "", pin: "" });
   var editVal = editValArr[0];
   var setEditVal = editValArr[1];
+  var adminTxArr = React.useState(null);
+  var adminTxId = adminTxArr[0];
+  var setAdminTxId = adminTxArr[1];
 
   function fixEmergencyGw(tid, newGw) {
     var n = parseInt(newGw, 10);
@@ -2879,6 +2883,10 @@ function AdminEntrants(props) {
                 onClick: function (id, team) { return function () { startEdit(id, team); }; }(tid, t),
                 style: { padding: "5px 8px", borderRadius: 8, border: "none", fontWeight: 700, fontSize: 11, background: "#1c3253", color: "#ffd23f", marginLeft: 4 }
               }, "Edit"),
+          isEditing ? null : React.createElement("button", {
+            onClick: function (id) { return function () { setAdminTxId(id); }; }(tid),
+            style: { padding: "5px 8px", borderRadius: 8, border: "none", fontWeight: 700, fontSize: 11, background: "#1c3253", color: "#6fcf6f", marginLeft: 4 }
+          }, "Transfer"),
           React.createElement("button", {
             onClick: function (id, name) { return function () { deleteTeam(id, name); }; }(tid, t.teamName),
             style: { padding: "5px 8px", borderRadius: 8, border: "none", fontWeight: 700, fontSize: 11, background: "#3a1c1c", color: "#ff9a9a", marginLeft: 4 }
@@ -2902,6 +2910,41 @@ function AdminEntrants(props) {
       )
     );
   });
+
+  if (adminTxId && teamsObj[adminTxId]) {
+    var atTeam = teamsObj[adminTxId];
+    var atNow = nowMs();
+    var atWins = config.transferWindows || CFG.transferWindows;
+    var atIdx = activeWindowIndex(atWins, atNow);
+    if (atIdx < 0) {
+      var atYmd = londonParts(atNow).ymd;
+      for (var awi = 0; awi < atWins.length; awi++) { if (atWins[awi].opens <= atYmd) atIdx = awi; }
+    }
+    if (atIdx < 0) atIdx = 0;
+    var atLog = atTeam.transferLog || [];
+    var atUsed = 0;
+    for (var ali = 0; ali < atLog.length; ali++) {
+      if (atLog[ali].type === "window" && atLog[ali].windowIndex === atIdx) atUsed++;
+    }
+    var atFrom = new Date(((atWins[atIdx] || {}).activeFrom || "2000-01-01") + "T00:00:00").getTime();
+    return React.createElement("div", null,
+      React.createElement(Card, null,
+        React.createElement("div", { style: { fontSize: 12, color: "#ffd23f" } },
+          "ADMIN: making a transfer on behalf of " + (atTeam.entrantName || "") + " (" + (atTeam.teamName || "") + ") \u2014 " + ((atWins[atIdx] || {}).label || "window") + ". Works even after the window has closed."
+        )
+      ),
+      React.createElement(TeamBuilder, {
+        players: ALL_PLAYERS, gwstats: gridStats,
+        mode: "transfer", transferKind: "window", byAdmin: true,
+        teamId: adminTxId, initialSelected: atTeam.playerIds || [],
+        windowIndex: atIdx, maxChanges: CFG.transfersPerWindow - atUsed, transferLog: atLog,
+        canTransferNow: function () { return true; },
+        windowEffectiveGw: nextUnstartedWeekGw(fixturesObj, config, Math.max(atNow, atFrom), (config.currentGameweek || 1) + 1),
+        onSaved: function () { setSyncMsg("Transfer saved for " + (atTeam.teamName || "team") + "."); setAdminTxId(null); },
+        onCancel: function () { setAdminTxId(null); }
+      })
+    );
+  }
 
   return React.createElement(Card, null,
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 6 } },
