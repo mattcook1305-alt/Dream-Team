@@ -2594,6 +2594,9 @@ function AdminEntrants(props) {
   var adminTxArr = React.useState(null);
   var adminTxId = adminTxArr[0];
   var setAdminTxId = adminTxArr[1];
+  var adminSearchArr = React.useState("");
+  var adminSearch = adminSearchArr[0];
+  var setAdminSearch = adminSearchArr[1];
 
   function fixEmergencyGw(tid, newGw) {
     var n = parseInt(newGw, 10);
@@ -2786,8 +2789,15 @@ function AdminEntrants(props) {
     ALL_CLUBS.map(function (c) { return React.createElement("option", { key: c, value: c }, c); })
   );
 
+  var adminQ = (adminSearch || "").trim().toLowerCase();
+  var shownCount = 0;
   var rows = teamIds.map(function (tid) {
     var t = teamsObj[tid];
+    if (adminQ) {
+      var hay = ((t.teamName || "") + " " + (t.entrantName || "") + " " + (t.phone || "") + " " + (t.email || "")).toLowerCase();
+      if (hay.indexOf(adminQ) < 0) return null;
+    }
+    shownCount++;
     var pmt = t.payments || {};
     var totalPaid = (pmt.a ? 40 : 0) + (pmt.b ? 20 : 0) + (pmt.c ? 20 : 0);
     var emStatus = "not used";
@@ -2956,6 +2966,12 @@ function AdminEntrants(props) {
     ),
     React.createElement("div", { style: { fontSize: 11, opacity: 0.7, marginBottom: 8 } }, "Emergency transfers apply automatically once their effective gameweek arrives \u2014 no action needed here. Scores recalculate automatically whenever fixtures/stats are updated from Admin > Update scores."),
     syncMsg ? React.createElement("div", { style: { fontSize: 11, color: "#ffd23f", marginBottom: 8 } }, syncMsg) : null,
+    React.createElement("input", {
+      placeholder: "\ud83d\udd0d Search name, team, phone or email", value: adminSearch,
+      onChange: function (e) { setAdminSearch(e.target.value); },
+      style: { width: "100%", padding: 10, borderRadius: 8, marginBottom: 10, background: "#1c3253", color: "#fff", border: "none", fontSize: 14, boxSizing: "border-box" }
+    }),
+    adminQ && shownCount === 0 ? React.createElement("div", { style: { opacity: 0.7, fontSize: 13 } }, "No entrant matches \"" + adminSearch + "\".") : null,
     rows
   );
 }
