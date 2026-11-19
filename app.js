@@ -2597,6 +2597,28 @@ function AdminEntrants(props) {
   var adminSearchArr = React.useState("");
   var adminSearch = adminSearchArr[0];
   var setAdminSearch = adminSearchArr[1];
+  var notTxArr = React.useState(false);
+  var notTxOpen = notTxArr[0];
+  var setNotTxOpen = notTxArr[1];
+  var copyArr = React.useState("");
+  var copyMsg = copyArr[0];
+  var setCopyMsg = copyArr[1];
+
+  function currentWindowIdx() {
+    var wins = config.transferWindows || CFG.transferWindows;
+    var ix = activeWindowIndex(wins, nowMs());
+    if (ix < 0) {
+      var ymd = londonParts(nowMs()).ymd;
+      for (var wi = 0; wi < wins.length; wi++) { if (wins[wi].opens <= ymd) ix = wi; }
+    }
+    return ix < 0 ? 0 : ix;
+  }
+  function windowUsed(t, ix) {
+    var lg = t.transferLog || [];
+    var n = 0;
+    for (var qi = 0; qi < lg.length; qi++) { if (lg[qi].type === "window" && lg[qi].windowIndex === ix) n++; }
+    return n;
+  }
 
   function fixEmergencyGw(tid, newGw) {
     var n = parseInt(newGw, 10);
@@ -2648,6 +2670,7 @@ function AdminEntrants(props) {
       lines.push(["Team Name", t.teamName || ""].map(csvEscape).join(","));
       lines.push(["Payment Status", "Paid \u00a3" + totalPaid + ", Owed \u00a3" + owed].map(csvEscape).join(","));
       lines.push(["Emergency Transfer", emStatus].map(csvEscape).join(","));
+      lines.push(["Transfer window used", windowUsed(t, currentWindowIdx()) + " of " + CFG.transfersPerWindow + (windowUsed(t, currentWindowIdx()) === 0 ? "  (NOT DONE YET)" : "")].map(csvEscape).join(","));
       lines.push(["Sweepstake Team", t.sweepstakeClub || ""].map(csvEscape).join(","));
       for (var s = 0; s < 11; s++) {
         var pl = sortedIds[s] ? PLAYERS_BY_ID[sortedIds[s]] : null;
@@ -2921,6 +2944,25 @@ function AdminEntrants(props) {
     );
   });
 
+  var ntIdx = currentWindowIdx();
+  var ntWins = config.transferWindows || CFG.transferWindows;
+  var ntNone = [];
+  var ntSome = [];
+  for (var nti = 0; nti < teamIds.length; nti++) {
+    var ntT = teamsObj[teamIds[nti]];
+    var ntU = windowUsed(ntT, ntIdx);
+    var ntLabel = (ntT.entrantName || "?") + " (" + (ntT.teamName || "?") + ")";
+    if (ntU === 0) ntNone.push(ntLabel); else if (ntU < CFG.transfersPerWindow) ntSome.push(ntLabel + " \u2013 " + ntU + " of " + CFG.transfersPerWindow);
+  }
+  ntNone.sort(function (a, b) { return a.toLowerCase() < b.toLowerCase() ? -1 : 1; });
+  ntSome.sort(function (a, b) { return a.toLowerCase() < b.toLowerCase() ? -1 : 1; });
+  var ntText = "Haven't made a " + ((ntWins[ntIdx] || {}).label || "window") + " transfer yet (" + ntNone.length + "):\n" + (ntNone.length ? ntNone.join("\n") : "Everyone has!");
+  function copyNotTx() {
+    try {
+      navigator.clipboard.writeText(ntText).then(function () { setCopyMsg("Copied!"); }, function () { setCopyMsg("Press and hold the text to copy."); });
+    } catch (e) { setCopyMsg("Press and hold the text to copy."); }
+  }
+
   if (adminTxId && teamsObj[adminTxId]) {
     var atTeam = teamsObj[adminTxId];
     var atNow = nowMs();
@@ -2960,12 +3002,21 @@ function AdminEntrants(props) {
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 6 } },
       React.createElement("div", { style: { fontWeight: 700 } }, "Entrants (" + teamIds.length + " teams, " + paidCount + " fully paid)"),
       React.createElement("div", { style: { display: "flex", gap: 6, flexWrap: "wrap" } },
+        React.createElement(Btn, { variant: "ghost", onClick: function () { setNotTxOpen(!notTxOpen); setCopyMsg(""); } }, "\ud83d\udccb Not transferred (" + ntNone.length + ")"),
         React.createElement(Btn, { variant: "ghost", onClick: exportTeamsCSV }, "\u2b07\ufe0f Export"),
         React.createElement(Btn, { variant: "ghost", onClick: exportSeasonGrid }, "\u2b07\ufe0f Season grid")
       )
     ),
     React.createElement("div", { style: { fontSize: 11, opacity: 0.7, marginBottom: 8 } }, "Emergency transfers apply automatically once their effective gameweek arrives \u2014 no action needed here. Scores recalculate automatically whenever fixtures/stats are updated from Admin > Update scores."),
     syncMsg ? React.createElement("div", { style: { fontSize: 11, color: "#ffd23f", marginBottom: 8 } }, syncMsg) : null,
+    notTxOpen ? React.createElement("div", { style: { background: "#12233f", borderRadius: 8, padding: 10, marginBottom: 10 } },
+      React.createElement("textarea", { readOnly: true, value: ntText, rows: Math.min(14, ntNone.length + 2), style: { width: "100%", boxSizing: "border-box", background: "#1c3253", color: "#fff", border: "none", borderRadius: 6, padding: 8, fontSize: 13 } }),
+      React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center", marginTop: 6 } },
+        React.createElement(Btn, { onClick: copyNotTx }, "Copy list"),
+        copyMsg ? React.createElement("span", { style: { fontSize: 12, color: "#6fcf6f" } }, copyMsg) : null
+      ),
+      ntSome.length ? React.createElement("div", { style: { fontSize: 11, opacity: 0.7, marginTop: 8 } }, "Made some but not all 3: " + ntSome.join("; ")) : null
+    ) : null,
     React.createElement("input", {
       placeholder: "\ud83d\udd0d Search name, team, phone or email", value: adminSearch,
       onChange: function (e) { setAdminSearch(e.target.value); },
